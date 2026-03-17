@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from roboclaw.embodied.definition.foundation.schema import CapabilityFamily, TransportKind
 
@@ -347,3 +348,282 @@ class AdapterBinding:
                 raise ValueError(
                     f"Adapter '{self.id}' degraded mode '{mode.mode.value}' references unknown error codes: {names}."
                 )
+
+
+@dataclass(frozen=True)
+class EnvironmentProbeResult:
+    """Structured result for probing runtime environment readiness."""
+
+    adapter_id: str
+    assembly_id: str
+    transport: TransportKind | None = None
+    available_targets: tuple[str, ...] = field(default_factory=tuple)
+    detected_dependencies: tuple[str, ...] = field(default_factory=tuple)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DependencyCheckItem:
+    """One dependency check outcome."""
+
+    dependency_id: str
+    kind: DependencyKind
+    required: bool
+    available: bool
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.dependency_id.strip():
+            raise ValueError("Dependency check item dependency_id cannot be empty.")
+        if self.message is not None and not self.message.strip():
+            raise ValueError(
+                f"Dependency check item '{self.dependency_id}' message cannot be empty when specified."
+            )
+
+
+@dataclass(frozen=True)
+class DependencyCheckResult:
+    """Structured result for adapter dependency checks."""
+
+    adapter_id: str
+    ok: bool
+    items: tuple[DependencyCheckItem, ...] = field(default_factory=tuple)
+    checked_dependencies: tuple[str, ...] = field(default_factory=tuple)
+    missing_required: tuple[str, ...] = field(default_factory=tuple)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        item_ids = [item.dependency_id for item in self.items]
+        if len(set(item_ids)) != len(item_ids):
+            raise ValueError("Dependency check items cannot contain duplicate dependency_id values.")
+        if self.ok and self.missing_required:
+            raise ValueError("Dependency check result cannot be ok=True with missing required dependencies.")
+        if any(not dep_id.strip() for dep_id in self.checked_dependencies):
+            raise ValueError("checked_dependencies cannot contain empty values.")
+        if any(not dep_id.strip() for dep_id in self.missing_required):
+            raise ValueError("missing_required cannot contain empty values.")
+
+
+@dataclass(frozen=True)
+class AdapterOperationResult:
+    """Structured result for one adapter operation call."""
+
+    operation: AdapterOperation
+    ok: bool
+    target_id: str | None = None
+    message: str | None = None
+    error_code: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.target_id is not None and not self.target_id.strip():
+            raise ValueError(
+                f"Adapter operation result '{self.operation.value}' target_id cannot be empty when specified."
+            )
+        if self.message is not None and not self.message.strip():
+            raise ValueError(
+                f"Adapter operation result '{self.operation.value}' message cannot be empty when specified."
+            )
+        if self.error_code is not None and not self.error_code.strip():
+            raise ValueError(
+                f"Adapter operation result '{self.operation.value}' error_code cannot be empty when specified."
+            )
+        if self.ok and self.error_code is not None:
+            raise ValueError(
+                f"Adapter operation result '{self.operation.value}' cannot include error_code when ok=True."
+            )
+
+
+@dataclass(frozen=True)
+class ReadinessReport:
+    """Structured readiness report for command execution."""
+
+    ready: bool
+    target_id: str | None = None
+    blocked_operations: tuple[AdapterOperation, ...] = field(default_factory=tuple)
+    message: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.target_id is not None and not self.target_id.strip():
+            raise ValueError("Readiness report target_id cannot be empty when specified.")
+        if self.ready and self.blocked_operations:
+            raise ValueError("Readiness report cannot block operations when ready=True.")
+        if self.message is not None and not self.message.strip():
+            raise ValueError("Readiness report message cannot be empty when specified.")
+
+
+@dataclass(frozen=True)
+class HealthReport:
+    """Structured adapter health report."""
+
+    mode: AdapterHealthMode
+    healthy: bool
+    error_codes: tuple[str, ...] = field(default_factory=tuple)
+    blocked_operations: tuple[AdapterOperation, ...] = field(default_factory=tuple)
+    message: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.mode == AdapterHealthMode.READY and not self.healthy:
+            raise ValueError("Health report mode READY requires healthy=True.")
+        if self.message is not None and not self.message.strip():
+            raise ValueError("Health report message cannot be empty when specified.")
+        if any(not code.strip() for code in self.error_codes):
+            raise ValueError("Health report error_codes cannot contain empty values.")
+
+
+@dataclass(frozen=True)
+class CompatibilityCheckItem:
+    """One compatibility check evaluation result."""
+
+    component: CompatibilityComponent
+    target: str
+    requirement: str
+    satisfied: bool
+    required: bool = True
+    detected_version: str | None = None
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.target.strip():
+            raise ValueError("Compatibility check item target cannot be empty.")
+        if not self.requirement.strip():
+            raise ValueError(
+                f"Compatibility check item '{self.target}' requirement cannot be empty."
+            )
+        if self.detected_version is not None and not self.detected_version.strip():
+            raise ValueError(
+                f"Compatibility check item '{self.target}' detected_version cannot be empty when specified."
+            )
+        if self.message is not None and not self.message.strip():
+            raise ValueError(
+                f"Compatibility check item '{self.target}' message cannot be empty when specified."
+            )
+
+
+@dataclass(frozen=True)
+class CompatibilityCheckResult:
+    """Structured adapter compatibility evaluation result."""
+
+    adapter_api_version: str
+    compatible: bool
+    checks: tuple[CompatibilityCheckItem, ...] = field(default_factory=tuple)
+    blocking_failures: tuple[str, ...] = field(default_factory=tuple)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if not self.adapter_api_version.strip():
+            raise ValueError("Compatibility check result adapter_api_version cannot be empty.")
+        if self.compatible and self.blocking_failures:
+            raise ValueError("Compatibility check result cannot be compatible=True with blocking_failures.")
+        keys = [(item.component, item.target) for item in self.checks]
+        if len(set(keys)) != len(keys):
+            raise ValueError("Compatibility check items cannot contain duplicate component/target pairs.")
+        if any(not failure.strip() for failure in self.blocking_failures):
+            raise ValueError("blocking_failures cannot contain empty values.")
+
+
+@dataclass(frozen=True)
+class AdapterStateSnapshot:
+    """Structured normalized adapter state snapshot."""
+
+    source: str = "adapter"
+    target_id: str | None = None
+    values: dict[str, Any] = field(default_factory=dict)
+    updated_fields: tuple[str, ...] = field(default_factory=tuple)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if not self.source.strip():
+            raise ValueError("Adapter state snapshot source cannot be empty.")
+        if self.target_id is not None and not self.target_id.strip():
+            raise ValueError("Adapter state snapshot target_id cannot be empty when specified.")
+        if any(not field_name.strip() for field_name in self.updated_fields):
+            raise ValueError("Adapter state snapshot updated_fields cannot contain empty values.")
+
+
+@dataclass(frozen=True)
+class PrimitiveExecutionResult:
+    """Structured result for primitive execution."""
+
+    primitive_name: str
+    accepted: bool
+    completed: bool | None = None
+    status: str = "accepted"
+    message: str | None = None
+    error_code: str | None = None
+    output: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.primitive_name.strip():
+            raise ValueError("Primitive execution result primitive_name cannot be empty.")
+        if not self.status.strip():
+            raise ValueError(
+                f"Primitive execution result '{self.primitive_name}' status cannot be empty."
+            )
+        if self.message is not None and not self.message.strip():
+            raise ValueError(
+                f"Primitive execution result '{self.primitive_name}' message cannot be empty when specified."
+            )
+        if self.error_code is not None and not self.error_code.strip():
+            raise ValueError(
+                f"Primitive execution result '{self.primitive_name}' error_code cannot be empty when specified."
+            )
+        if self.accepted and self.error_code is not None:
+            raise ValueError(
+                f"Primitive execution result '{self.primitive_name}' cannot include error_code when accepted=True."
+            )
+
+
+@dataclass(frozen=True)
+class SensorCaptureResult:
+    """Structured result for one sensor capture request."""
+
+    sensor_id: str
+    mode: str = "latest"
+    captured: bool = True
+    media_type: str | None = None
+    payload_ref: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.sensor_id.strip():
+            raise ValueError("Sensor capture result sensor_id cannot be empty.")
+        if not self.mode.strip():
+            raise ValueError(
+                f"Sensor capture result '{self.sensor_id}' mode cannot be empty."
+            )
+        if self.media_type is not None and not self.media_type.strip():
+            raise ValueError(
+                f"Sensor capture result '{self.sensor_id}' media_type cannot be empty when specified."
+            )
+        if self.payload_ref is not None and not self.payload_ref.strip():
+            raise ValueError(
+                f"Sensor capture result '{self.sensor_id}' payload_ref cannot be empty when specified."
+            )
+        if self.message is not None and not self.message.strip():
+            raise ValueError(
+                f"Sensor capture result '{self.sensor_id}' message cannot be empty when specified."
+            )
+
+
+@dataclass(frozen=True)
+class DebugSnapshotResult:
+    """Structured debug snapshot result."""
+
+    captured: bool
+    summary: str
+    artifacts: tuple[str, ...] = field(default_factory=tuple)
+    payload: dict[str, Any] = field(default_factory=dict)
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.summary.strip():
+            raise ValueError("Debug snapshot result summary cannot be empty.")
+        if any(not artifact.strip() for artifact in self.artifacts):
+            raise ValueError("Debug snapshot result artifacts cannot contain empty values.")
+        if self.message is not None and not self.message.strip():
+            raise ValueError("Debug snapshot result message cannot be empty when specified.")

@@ -31,13 +31,25 @@ from roboclaw.embodied.execution.integration.adapters import (
     AdapterHealthMode,
     AdapterLifecycleContract,
     AdapterOperation,
+    AdapterOperationResult,
+    AdapterStateSnapshot,
+    CompatibilityCheckItem,
+    CompatibilityCheckResult,
     CompatibilityComponent,
+    DebugSnapshotResult,
     DegradedModeSpec,
+    DependencyCheckItem,
+    DependencyCheckResult,
     DependencyKind,
     DependencySpec,
+    EnvironmentProbeResult,
     ErrorCategory,
     ErrorCodeSpec,
+    HealthReport,
     OperationTimeout,
+    PrimitiveExecutionResult,
+    ReadinessReport,
+    SensorCaptureResult,
     TimeoutPolicy,
     VersionConstraint,
 )
@@ -401,6 +413,116 @@ def test_adapter_lifecycle_contract_is_machine_checkable() -> None:
     assert binding.degraded_modes[0].mode == AdapterHealthMode.DEGRADED
     assert binding.degraded_modes[0].entered_on_error_codes == ("DEP_MISSING",)
     assert binding.compatibility.for_component(CompatibilityComponent.TRANSPORT)[0].target == "ros2"
+
+
+def test_adapter_result_models_are_machine_checkable() -> None:
+    probe = EnvironmentProbeResult(
+        adapter_id="workspace_ros2_adapter",
+        assembly_id="workspace_so101",
+        transport=TransportKind.ROS2,
+        available_targets=("real", "sim_gazebo"),
+        detected_dependencies=("ros2_bridge", "camera_node"),
+        notes=("probe complete",),
+        details={"latency_ms": 4},
+    )
+    assert probe.transport == TransportKind.ROS2
+    assert probe.available_targets == ("real", "sim_gazebo")
+
+    dep_item = DependencyCheckItem(
+        dependency_id="ros2_bridge",
+        kind=DependencyKind.ROS2_NODE,
+        required=True,
+        available=True,
+        message="bridge reachable",
+    )
+    dep_result = DependencyCheckResult(
+        adapter_id="workspace_ros2_adapter",
+        ok=True,
+        items=(dep_item,),
+        checked_dependencies=("ros2_bridge",),
+    )
+    assert dep_result.ok is True
+    assert dep_result.items[0].kind == DependencyKind.ROS2_NODE
+
+    connect_result = AdapterOperationResult(
+        operation=AdapterOperation.CONNECT,
+        ok=True,
+        target_id="real",
+        message="connected",
+        details={"session": "demo"},
+    )
+    assert connect_result.operation == AdapterOperation.CONNECT
+    assert connect_result.target_id == "real"
+
+    readiness = ReadinessReport(
+        ready=True,
+        target_id="real",
+        details={"controller_state": "active"},
+    )
+    assert readiness.ready is True
+
+    health = HealthReport(
+        mode=AdapterHealthMode.DEGRADED,
+        healthy=False,
+        error_codes=("TRANSPORT_UNAVAILABLE",),
+        blocked_operations=(AdapterOperation.CONNECT,),
+        message="running in degraded mode",
+    )
+    assert health.mode == AdapterHealthMode.DEGRADED
+    assert health.healthy is False
+
+    compatibility = CompatibilityCheckResult(
+        adapter_api_version="1.0",
+        compatible=True,
+        checks=(
+            CompatibilityCheckItem(
+                component=CompatibilityComponent.TRANSPORT,
+                target="ros2",
+                requirement=">=1.0,<2.0",
+                satisfied=True,
+            ),
+        ),
+    )
+    assert compatibility.compatible is True
+    assert compatibility.checks[0].component == CompatibilityComponent.TRANSPORT
+
+    state = AdapterStateSnapshot(
+        source="adapter",
+        target_id="real",
+        values={"joint_positions": {"j1": 0.1}},
+        updated_fields=("joint_positions",),
+    )
+    assert state.values["joint_positions"]["j1"] == 0.1
+
+    primitive = PrimitiveExecutionResult(
+        primitive_name="move_joint",
+        accepted=True,
+        completed=True,
+        status="succeeded",
+        output={"duration_s": 1.2},
+    )
+    assert primitive.completed is True
+    assert primitive.status == "succeeded"
+
+    capture = SensorCaptureResult(
+        sensor_id="wrist_camera",
+        mode="latest",
+        captured=True,
+        media_type="image/jpeg",
+        payload_ref="file:///tmp/frame.jpg",
+        metadata={"width": 640, "height": 480},
+    )
+    assert capture.captured is True
+    assert capture.media_type == "image/jpeg"
+
+    debug = DebugSnapshotResult(
+        captured=True,
+        summary="adapter debug snapshot",
+        artifacts=("file:///tmp/debug.json",),
+        payload={"fault_code": "none"},
+    )
+    assert debug.captured is True
+    assert debug.artifacts[0] == "file:///tmp/debug.json"
 
 
 def test_procedure_contract_is_machine_checkable() -> None:
