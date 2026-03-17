@@ -1,4 +1,8 @@
-"""Workspace robot manifest template."""
+"""Workspace robot manifest template.
+
+Replace every placeholder from intake facts. This scaffold is intentionally
+generic so it can describe arms, bases, hands, humanoids, or drones.
+"""
 
 from roboclaw.embodied.definition.components.robots import PrimitiveSpec, RobotManifest
 from roboclaw.embodied.definition.foundation.schema import (
@@ -44,73 +48,71 @@ ROBOT = RobotManifest(
     id="<robot_id>",
     name="<robot_name>",
     description="<robot_description>",
-    robot_type=RobotType.ARM,
+    robot_type=RobotType.<robot_type_enum>,
     capability_families=(
         CapabilityFamily.LIFECYCLE,
-        CapabilityFamily.JOINT_MOTION,
+        CapabilityFamily.<primary_capability_family_enum>,
     ),
     primitives=(
         PrimitiveSpec(
-            name="move_joint",
-            kind=PrimitiveKind.MOTION,
-            capability_family=CapabilityFamily.JOINT_MOTION,
-            command_mode=CommandMode.POSITION,
-            description="Move one joint-space command.",
+            name="<primitive_name>",
+            kind=PrimitiveKind.<primitive_kind_enum>,
+            capability_family=CapabilityFamily.<primary_capability_family_enum>,
+            command_mode=CommandMode.<command_mode_enum>,
+            description="<primitive_description>",
             parameters=(
                 ParameterSpec(
-                    name="positions",
-                    value_type="dict[str,float]",
-                    description="Joint name to target position map.",
+                    name="<parameter_name>",
+                    value_type="<parameter_type>",
+                    description="<parameter_description>",
                     required=True,
-                    unit=ValueUnit.RADIAN,
-                    frame="joint_space",
+                    unit=ValueUnit.<parameter_unit_enum>,
+                    frame="<parameter_frame_or_none>",
                 ),
             ),
-            tolerance=ToleranceSpec(absolute=0.02, settle_time_s=0.2),
+            tolerance=ToleranceSpec(
+                absolute=<absolute_tolerance_or_none>,
+                settle_time_s=<settle_time_s_or_none>,
+            ),
             action_schema=ActionSchema(
-                id="<robot_id>_move_joint_action_v1",
-                command_mode=CommandMode.POSITION,
-                feedback_mode=FeedbackMode.TRAJECTORY_STATUS,
-                parameter_order=("positions",),
-                command_frame="joint_space",
-                command_rate_hz=30.0,
+                id="<action_schema_id>",
+                command_mode=CommandMode.<command_mode_enum>,
+                feedback_mode=FeedbackMode.<feedback_mode_enum>,
+                parameter_order=("<parameter_name>",),
+                command_frame="<command_frame_or_none>",
+                command_rate_hz=<command_rate_hz_or_none>,
             ),
             completion=CompletionSpec(
-                semantics=CompletionSemantics.GOAL_REACHED,
-                timeout_s=5.0,
+                semantics=CompletionSemantics.<completion_semantics_enum>,
+                timeout_s=<completion_timeout_s_or_none>,
             ),
             backed_by=("<backend_primitive>",),
         ),
     ),
     observation_schema=ObservationSchema(
-        id="<robot_id>_observation_v1",
+        id="<observation_schema_id>",
         fields=(
             ObservationFieldSpec(
-                name="joint_positions",
-                value_type="dict[str,float]",
-                description="Joint positions for all controllable joints.",
-                unit=ValueUnit.RADIAN,
-                frame="joint_space",
+                name="<observation_field_name>",
+                value_type="<observation_field_type>",
+                description="<observation_field_description>",
+                unit=ValueUnit.<observation_unit_enum>,
+                frame="<observation_frame_or_none>",
             ),
         ),
-        frequency_hz=30.0,
+        frequency_hz=<observation_frequency_hz_or_none>,
     ),
     health_schema=HealthSchema(
-        id="<robot_id>_health_v1",
+        id="<health_schema_id>",
         fields=(
             HealthFieldSpec(
-                name="level",
-                value_type="str",
-                description="Normalized health level.",
-            ),
-            HealthFieldSpec(
-                name="fault_code",
-                value_type="str",
-                description="Vendor or adapter fault code.",
+                name="<health_field_name>",
+                value_type="<health_field_type>",
+                description="<health_field_description>",
             ),
         ),
     ),
     safety=SafetyProfile(
-        default_reset_mode="home",
+        default_reset_mode="<default_reset_mode>",
     ),
 )

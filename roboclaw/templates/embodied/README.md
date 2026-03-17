@@ -11,7 +11,7 @@ This directory is where RoboClaw should generate or refine setup-specific embodi
 - `adapters/`: transport-specific adapter bindings and entrypoints for this setup
 - `simulators/`: world and scenario files for local simulation targets
 - `intake/`: discovery notes captured from user conversation or environment inspection
-- `_templates/`: starting points for generated Python files
+- `_templates/`: intentionally minimal scaffolds for generated Python files
 
 ## Policy
 
@@ -20,3 +20,4 @@ This directory is where RoboClaw should generate or refine setup-specific embodi
 - Update these files instead of touching `roboclaw/embodied/` when the change is specific to one user's equipment.
 - Workspace Python files are discovered by export name. Use `ROBOT`, `SENSOR`, `ASSEMBLY`, `DEPLOYMENT`, `ADAPTER`, `WORLD`, `SCENARIO`, or the plural form of each.
 - Each generated file should include `WORKSPACE_ASSET = WorkspaceAssetContract(...)` with schema version and migration policy so the loader can validate and migrate safely.
+- Treat `_templates/` as fragments to adapt after intake. They should not hardcode one robot class, one camera mount, or one simulator backend.

@@ -1,4 +1,8 @@
-"""Workspace sensor manifest template."""
+"""Workspace sensor manifest template.
+
+Replace the placeholders from intake facts. This scaffold can describe cameras,
+depth sensors, force-torque sensors, IMUs, lidars, or setup-specific devices.
+"""
 
 from roboclaw.embodied.definition.components.sensors import SensorManifest
 from roboclaw.embodied.definition.foundation.schema import SensorKind
@@ -25,7 +29,8 @@ WORKSPACE_ASSET = WorkspaceAssetContract(
 
 SENSOR = SensorManifest(
     id="<sensor_id>",
-    kind=SensorKind.CAMERA,
+    kind=SensorKind.<sensor_kind_enum>,
     description="<sensor_description>",
-    default_topic_name="<topic_name>",
+    mount_points=("<mount_point_or_none>",),
+    default_topic_name="<default_topic_name_or_none>",
 )

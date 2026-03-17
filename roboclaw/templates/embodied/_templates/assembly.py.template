@@ -1,25 +1,14 @@
-"""Workspace assembly template."""
+"""Workspace assembly template.
 
-from roboclaw.embodied.definition.components.robots import Ros2RobotConfig
-from roboclaw.embodied.definition.components.sensors import Ros2CameraConfig
-from roboclaw.embodied.definition.systems.assemblies import (
-    AssemblyBlueprint,
-    ControlGroup,
-    FailureDomain,
-    FrameTransform,
-    ResourceLockScope,
-    ResourceOwnership,
-    RobotAttachment,
-    SafetyBoundary,
-    SafetyZone,
-    SensorAttachment,
-    ToolAttachment,
-    Transform3D,
-)
+Start from intake facts and add only the topology this setup actually needs.
+Do not assume a wrist camera, manipulator tool, simulator target, or arm-only
+control group unless the embodiment requires them.
+"""
+
+from roboclaw.embodied.definition.components.robots import RobotConfig
+from roboclaw.embodied.definition.systems.assemblies import AssemblyBlueprint, RobotAttachment
 from roboclaw.embodied.execution.integration.carriers.real import build_real_ros2_target
-from roboclaw.embodied.execution.integration.carriers.sim import build_sim_ros2_target
 from roboclaw.embodied.execution.integration.transports.ros2 import build_standard_ros2_contract
-from roboclaw.embodied.definition.foundation.schema import SimulatorKind
 from roboclaw.embodied.workspace import (
     WORKSPACE_SCHEMA_VERSION,
     WorkspaceAssetContract,
@@ -41,32 +30,17 @@ WORKSPACE_ASSET = WorkspaceAssetContract(
     ),
 )
 
-ARM_CONFIG = Ros2RobotConfig(
-    namespace="<ros_namespace>",
+PRIMARY_ROBOT_CONFIG = RobotConfig(
+    instance_id="<robot_instance_id>",
+    calibration_dir="<calibration_dir_or_none>",
     base_frame="<base_frame>",
-    tool_frame="<tool_frame>",
-    joint_state_topic="<joint_state_topic>",
-    command_action="<command_action>",
-)
-
-PRIMARY_CAMERA_CONFIG = Ros2CameraConfig(
-    frame_id="<camera_frame>",
-    topic_namespace="<camera_topic_namespace>",
-    image_topic_name="<image_topic_name>",
-    info_topic_name="<camera_info_topic_name>",
+    tool_frame="<tool_frame_or_none>",
 )
 
 REAL_TARGET = build_real_ros2_target(
-    target_id="real",
-    description="Real hardware target.",
-    ros2=build_standard_ros2_contract("<assembly_id>", "real"),
-)
-
-SIM_TARGET = build_sim_ros2_target(
-    target_id="sim_gazebo",
-    simulator=SimulatorKind.GAZEBO,
-    description="Gazebo simulation target.",
-    ros2=build_standard_ros2_contract("<assembly_id>", "sim_gazebo"),
+    target_id="<target_id>",
+    description="<target_description>",
+    ros2=build_standard_ros2_contract("<assembly_id>", "<target_id>"),
 )
 
 ASSEMBLY = AssemblyBlueprint(
@@ -75,101 +49,22 @@ ASSEMBLY = AssemblyBlueprint(
     description="<assembly_description>",
     robots=(
         RobotAttachment(
-            attachment_id="primary",
+            attachment_id="<primary_robot_attachment_id>",
             robot_id="<robot_id>",
-            config=ARM_CONFIG,
+            config=PRIMARY_ROBOT_CONFIG,
         ),
     ),
-    sensors=(
-        SensorAttachment(
-            attachment_id="wrist_camera",
-            sensor_id="rgb_camera",
-            mount="wrist",
-            mount_frame="<tool_frame>",
-            mount_transform=Transform3D(
-                translation_xyz=(0.0, 0.0, 0.0),
-                rotation_rpy=(0.0, 0.0, 0.0),
-            ),
-            config=PRIMARY_CAMERA_CONFIG,
-        ),
-    ),
-    execution_targets=(REAL_TARGET, SIM_TARGET),
-    default_execution_target_id="real",
-    frame_transforms=(
-        FrameTransform(
-            parent_frame="<base_parent_frame>",
-            child_frame="<base_frame>",
-            transform=Transform3D(
-                translation_xyz=(0.0, 0.0, 0.0),
-                rotation_rpy=(0.0, 0.0, 0.0),
-            ),
-        ),
-        FrameTransform(
-            parent_frame="<base_frame>",
-            child_frame="<tool_frame>",
-            transform=Transform3D(
-                translation_xyz=(0.0, 0.0, 0.0),
-                rotation_rpy=(0.0, 0.0, 0.0),
-            ),
-        ),
-    ),
-    tools=(
-        ToolAttachment(
-            attachment_id="primary_tool",
-            robot_attachment_id="primary",
-            tool_id="<tool_id>",
-            mount_frame="<tool_frame>",
-            tcp_frame="<tcp_frame>",
-            kind="end_effector",
-        ),
-    ),
-    control_groups=(
-        ControlGroup(
-            id="manipulation",
-            robot_attachment_ids=("primary",),
-            sensor_attachment_ids=("wrist_camera",),
-            mode_hints=("position",),
-        ),
-    ),
-    default_control_group_id="manipulation",
-    safety_zones=(
-        SafetyZone(
-            id="primary_workspace",
-            frame="<base_frame>",
-            min_xyz=(-0.6, -0.6, 0.0),
-            max_xyz=(0.6, 0.6, 0.9),
-        ),
-    ),
-    safety_boundaries=(
-        SafetyBoundary(
-            id="manipulation_safety",
-            control_group_ids=("manipulation",),
-            robot_attachment_ids=("primary",),
-            sensor_attachment_ids=("wrist_camera",),
-            zone_ids=("primary_workspace",),
-            max_linear_speed_mps=0.25,
-            max_angular_speed_radps=0.75,
-            max_joint_speed_scale=0.6,
-        ),
-    ),
-    failure_domains=(
-        FailureDomain(
-            id="arm_cell",
-            robot_attachment_ids=("primary",),
-            sensor_attachment_ids=("wrist_camera",),
-            target_ids=("real", "sim_gazebo"),
-            containment_actions=("stop", "recover"),
-        ),
-    ),
-    resource_ownerships=(
-        ResourceOwnership(
-            id="manipulation_lock",
-            control_group_id="manipulation",
-            resource_ids=("joint_controller", "wrist_camera_stream"),
-            lock_scope=ResourceLockScope.EXCLUSIVE,
-            robot_attachment_ids=("primary",),
-            sensor_attachment_ids=("wrist_camera",),
-            failure_domain_id="arm_cell",
-        ),
+    sensors=(),
+    execution_targets=(REAL_TARGET,),
+    default_execution_target_id="<target_id>",
+    frame_transforms=(),
+    tools=(),
+    control_groups=(),
+    safety_zones=(),
+    safety_boundaries=(),
+    failure_domains=(),
+    resource_ownerships=(),
+    notes=(
+        "Add sensors, control groups, safety boundaries, and simulator targets only when intake confirms them.",
     ),
 ).build()

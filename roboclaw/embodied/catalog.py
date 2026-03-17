@@ -6,19 +6,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from roboclaw.embodied.definition import (
-    AssemblyRegistry,
-    DeploymentRegistry,
-    RGB_CAMERA,
-    RobotRegistry,
-    SO101_ROBOT,
-    SensorRegistry,
-    SimulatorRegistry,
-)
-from roboclaw.embodied.execution import (
-    AdapterRegistry,
+from roboclaw.embodied.definition.components.robots import RobotRegistry, SO101_ROBOT
+from roboclaw.embodied.definition.components.sensors import RGB_CAMERA, SensorRegistry
+from roboclaw.embodied.definition.systems.assemblies import AssemblyRegistry
+from roboclaw.embodied.definition.systems.deployments import DeploymentRegistry
+from roboclaw.embodied.definition.systems.simulators import SimulatorRegistry
+from roboclaw.embodied.execution.integration.adapters import AdapterRegistry
+from roboclaw.embodied.execution.integration.bridges import (
     BridgeRegistry,
     DEFAULT_DOMAIN_BRIDGES,
+)
+from roboclaw.embodied.execution.orchestration.procedures import (
     DEFAULT_PROCEDURES,
     ProcedureRegistry,
 )

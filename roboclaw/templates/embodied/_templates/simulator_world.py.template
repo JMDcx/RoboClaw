@@ -25,7 +25,7 @@ WORKSPACE_ASSET = WorkspaceAssetContract(
 
 WORLD = SimulatorWorld(
     id="<world_id>",
-    simulator=SimulatorKind.GAZEBO,
+    simulator=SimulatorKind.<simulator_kind_enum>,
     description="<world_description>",
     assets=("<scene_path_or_name>",),
     notes=(

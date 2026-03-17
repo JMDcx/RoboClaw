@@ -1,81 +1,84 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from roboclaw.embodied import (
-    ARM_HAND_BRIDGE,
-    AdapterCompatibilitySpec,
-    AdapterHealthMode,
+from roboclaw.embodied import RGB_CAMERA, SO101_ROBOT, build_default_catalog
+from roboclaw.embodied.definition.foundation.schema import (
+    CarrierKind,
     CommandMode,
-    CancellationMode,
-    CompatibilityComponent,
-    CompensationTrigger,
-    DEFAULT_PROCEDURES,
-    DEFAULT_DOMAIN_BRIDGES,
-    DRONE_BRIDGE,
-    HUMANOID_WHOLE_BODY_BRIDGE,
-    IdempotencyMode,
-    MOBILE_BASE_FLEET_BRIDGE,
-    ResourceLockScope,
-    RollbackStrategy,
-    RGB_CAMERA,
-    RawEvidenceHandle,
-    SafetyBoundary,
-    SafetyZone,
-    SIMULATOR_BRIDGE,
-    SO101_ROBOT,
-    TelemetryEvent,
-    BridgeDomain,
-    BridgeKind,
-    DomainBridgeContract,
-    DegradedModeSpec,
-    TelemetryKind,
-    TelemetryPhase,
-    TelemetrySeverity,
-    VersionConstraint,
-    WorkspaceAssetKind,
-    WorkspaceInspectOptions,
-    WorkspaceIssueLevel,
-    WorkspaceLintProfile,
-    WorkspaceMigrationPolicy,
-    WorkspaceValidationStage,
-    WorkspaceProvenance,
-    dry_run_workspace_assets,
-    build_default_catalog,
-    compose_assemblies,
-    inspect_workspace_assets,
+    CompletionSemantics,
+    RobotType,
+    TransportKind,
+    ValueUnit,
 )
 from roboclaw.embodied.definition.systems.assemblies import (
     AssemblyBlueprint,
     ControlGroup,
     FailureDomain,
     FrameTransform,
+    ResourceLockScope,
     ResourceOwnership,
     RobotAttachment,
+    SafetyBoundary,
+    SafetyZone,
     ToolAttachment,
     Transform3D,
+    compose_assemblies,
 )
 from roboclaw.embodied.definition.systems.assemblies.model import SensorAttachment
-from roboclaw.embodied.execution.orchestration.runtime import RuntimeManager, RuntimeStatus
-from roboclaw.embodied.definition.foundation.schema import (
-    CarrierKind,
-    CompletionSemantics,
-    RobotType,
-    TransportKind,
-    ValueUnit,
-)
-from roboclaw.embodied.execution.integration.carriers.real import build_real_ros2_target
 from roboclaw.embodied.execution.integration.adapters import (
     AdapterBinding,
+    AdapterCompatibilitySpec,
+    AdapterHealthMode,
     AdapterLifecycleContract,
     AdapterOperation,
+    CompatibilityComponent,
+    DegradedModeSpec,
     DependencyKind,
     DependencySpec,
     ErrorCategory,
     ErrorCodeSpec,
     OperationTimeout,
     TimeoutPolicy,
+    VersionConstraint,
 )
+from roboclaw.embodied.execution.integration.bridges import (
+    ARM_HAND_BRIDGE,
+    DEFAULT_DOMAIN_BRIDGES,
+    DRONE_BRIDGE,
+    HUMANOID_WHOLE_BODY_BRIDGE,
+    MOBILE_BASE_FLEET_BRIDGE,
+    SIMULATOR_BRIDGE,
+    BridgeDomain,
+    BridgeKind,
+    DomainBridgeContract,
+)
+from roboclaw.embodied.execution.integration.carriers.real import build_real_ros2_target
 from roboclaw.embodied.execution.integration.transports.ros2 import build_standard_ros2_contract
+from roboclaw.embodied.execution.observability import (
+    RawEvidenceHandle,
+    TelemetryEvent,
+    TelemetryKind,
+    TelemetryPhase,
+    TelemetrySeverity,
+)
+from roboclaw.embodied.execution.orchestration.procedures import (
+    CancellationMode,
+    CompensationTrigger,
+    DEFAULT_PROCEDURES,
+    IdempotencyMode,
+    RollbackStrategy,
+)
+from roboclaw.embodied.execution.orchestration.runtime import RuntimeManager, RuntimeStatus
+from roboclaw.embodied.workspace import (
+    WorkspaceAssetKind,
+    WorkspaceInspectOptions,
+    WorkspaceIssueLevel,
+    WorkspaceLintProfile,
+    WorkspaceMigrationPolicy,
+    WorkspaceProvenance,
+    WorkspaceValidationStage,
+    inspect_workspace_assets,
+)
 
 
 def _workspace_blueprint() -> AssemblyBlueprint:
@@ -588,7 +591,7 @@ def test_workspace_dry_run_reports_staged_provenance(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    report = dry_run_workspace_assets(tmp_path)
+    report = inspect_workspace_assets(tmp_path)
 
     assert report.has_errors is False
     assert report.staged_assets

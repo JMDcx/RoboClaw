@@ -1,4 +1,8 @@
-"""Workspace deployment profile template."""
+"""Workspace deployment profile template.
+
+Keep this file setup-specific. Attachment ids and connection keys must match
+the generated assembly and adapter for the active user environment.
+"""
 
 from roboclaw.embodied.definition.systems.deployments import DeploymentProfile
 from roboclaw.embodied.workspace import (
@@ -27,20 +31,13 @@ DEPLOYMENT = DeploymentProfile(
     assembly_id="<assembly_id>",
     target_id="<target_id>",
     connection={
-        "ros_namespace": "<ros_namespace>",
+        "<connection_key>": "<connection_value>",
     },
     robots={
-        "primary": {
-            "serial_port": "<serial_or_ip>",
-            "calibration_dir": "<calibration_dir>",
+        "<robot_attachment_id>": {
+            "<robot_connection_key>": "<robot_connection_value>",
         },
     },
-    sensors={
-        "wrist_camera": {
-            "device_id": "<device_id>",
-        },
-    },
-    safety_overrides={
-        "max_linear_speed": "<optional>",
-    },
+    sensors={},
+    safety_overrides={},
 )

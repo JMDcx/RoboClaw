@@ -277,24 +277,6 @@ def inspect_workspace_assets(
     return report
 
 
-def dry_run_workspace_assets(
-    workspace: Path,
-    options: WorkspaceInspectOptions | None = None,
-) -> WorkspaceLoadReport:
-    """Alias for explicit workspace dry-run usage."""
-
-    return inspect_workspace_assets(workspace, options=options)
-
-
-def validate_workspace_assets(
-    workspace: Path,
-    options: WorkspaceInspectOptions | None = None,
-) -> WorkspaceLoadReport:
-    """Validate workspace assets and return structured report."""
-
-    return inspect_workspace_assets(workspace, options=options)
-
-
 def load_workspace_assets(
     catalog: EmbodiedCatalog,
     workspace: Path,

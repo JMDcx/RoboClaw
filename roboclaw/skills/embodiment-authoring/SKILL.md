@@ -36,6 +36,7 @@ always: true
 ## Scaffolding
 
 - Prefer reading and adapting files under `embodied/_templates/` in the workspace instead of inventing structure from scratch.
+- The templates are skeletal on purpose. Do not preserve placeholder capability families, mounts, attachment ids, simulator backends, or safety defaults unless intake facts confirm them.
 - Use export names that the workspace loader can discover: `ROBOT`, `SENSOR`, `ASSEMBLY`, `DEPLOYMENT`, `ADAPTER`, `WORLD`, `SCENARIO`, or the plural form of each.
 - The intake note should record:
   - robot model and embodiment type
