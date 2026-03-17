@@ -3,8 +3,11 @@ from pathlib import Path
 
 from roboclaw.embodied import (
     ARM_HAND_BRIDGE,
+    AdapterCompatibilitySpec,
+    AdapterHealthMode,
     CommandMode,
     CancellationMode,
+    CompatibilityComponent,
     CompensationTrigger,
     DEFAULT_PROCEDURES,
     DEFAULT_DOMAIN_BRIDGES,
@@ -24,9 +27,11 @@ from roboclaw.embodied import (
     BridgeDomain,
     BridgeKind,
     DomainBridgeContract,
+    DegradedModeSpec,
     TelemetryKind,
     TelemetryPhase,
     TelemetrySeverity,
+    VersionConstraint,
     WorkspaceAssetKind,
     WorkspaceInspectOptions,
     WorkspaceIssueLevel,
@@ -211,6 +216,21 @@ def test_domain_bridge_contract_is_machine_checkable() -> None:
         implementation="workspace.adapters.ros2:Adapter",
         supported_targets=("real",),
         bridge_id=ARM_HAND_BRIDGE.id,
+        compatibility=AdapterCompatibilitySpec(
+            adapter_api_version="1.0",
+            constraints=(
+                VersionConstraint(
+                    component=CompatibilityComponent.TRANSPORT,
+                    target="ros2",
+                    requirement=">=1.0,<2.0",
+                ),
+                VersionConstraint(
+                    component=CompatibilityComponent.BRIDGE,
+                    target=ARM_HAND_BRIDGE.id,
+                    requirement=">=1.0,<2.0",
+                ),
+            ),
+        ),
     )
     assert adapter.bridge_id == ARM_HAND_BRIDGE.id
     assert len(catalog.bridges.for_domain(BridgeDomain.HUMANOID_WHOLE_BODY)) == 1
@@ -338,12 +358,43 @@ def test_adapter_lifecycle_contract_is_machine_checkable() -> None:
         implementation="workspace.adapters.ros2:Adapter",
         supported_targets=("real",),
         lifecycle=lifecycle,
+        degraded_modes=(
+            DegradedModeSpec(
+                mode=AdapterHealthMode.DEGRADED,
+                description="Transport degraded; only stop/recover paths are available.",
+                allowed_operations=(
+                    AdapterOperation.READY,
+                    AdapterOperation.STOP,
+                    AdapterOperation.RECOVER,
+                ),
+                entered_on_error_codes=("DEP_MISSING",),
+            ),
+        ),
+        compatibility=AdapterCompatibilitySpec(
+            adapter_api_version="1.0",
+            constraints=(
+                VersionConstraint(
+                    component=CompatibilityComponent.TRANSPORT,
+                    target="ros2",
+                    requirement=">=1.0,<2.0",
+                ),
+                VersionConstraint(
+                    component=CompatibilityComponent.BRIDGE,
+                    target=ARM_HAND_BRIDGE.id,
+                    requirement=">=1.0,<2.0",
+                    required=False,
+                ),
+            ),
+        ),
     )
 
     assert binding.lifecycle.supports(AdapterOperation.CONNECT)
     assert binding.lifecycle.supports(AdapterOperation.READY)
     assert binding.lifecycle.timeout_policy.timeout_for(AdapterOperation.CONNECT).timeout_s == 30.0
     assert binding.lifecycle.error_codes[0].category == ErrorCategory.DEPENDENCY
+    assert binding.degraded_modes[0].mode == AdapterHealthMode.DEGRADED
+    assert binding.degraded_modes[0].entered_on_error_codes == ("DEP_MISSING",)
+    assert binding.compatibility.for_component(CompatibilityComponent.TRANSPORT)[0].target == "ros2"
 
 
 def test_procedure_contract_is_machine_checkable() -> None:

@@ -3,14 +3,19 @@
 from roboclaw.embodied.definition.foundation.schema import TransportKind
 from roboclaw.embodied.execution.integration.adapters import (
     AdapterBinding,
+    AdapterCompatibilitySpec,
+    AdapterHealthMode,
     AdapterLifecycleContract,
     AdapterOperation,
+    CompatibilityComponent,
+    DegradedModeSpec,
     DependencyKind,
     DependencySpec,
     ErrorCategory,
     ErrorCodeSpec,
     OperationTimeout,
     TimeoutPolicy,
+    VersionConstraint,
 )
 from roboclaw.embodied.workspace import (
     WORKSPACE_SCHEMA_VERSION,
@@ -74,6 +79,48 @@ LIFECYCLE = AdapterLifecycleContract(
             retryable=True,
             related_operation=AdapterOperation.CONNECT,
         ),
+        ErrorCodeSpec(
+            code="TRANSPORT_UNAVAILABLE",
+            category=ErrorCategory.TRANSPORT,
+            description="Underlying transport is unavailable.",
+            recoverable=True,
+            retryable=True,
+        ),
+    ),
+)
+
+DEGRADED_MODES = (
+    DegradedModeSpec(
+        mode=AdapterHealthMode.DEGRADED,
+        description="Core motion path is unavailable but diagnostics and recovery remain active.",
+        allowed_operations=(
+            AdapterOperation.READY,
+            AdapterOperation.STOP,
+            AdapterOperation.RECOVER,
+        ),
+        entered_on_error_codes=("TRANSPORT_UNAVAILABLE",),
+    ),
+)
+
+COMPATIBILITY = AdapterCompatibilitySpec(
+    adapter_api_version="1.0",
+    constraints=(
+        VersionConstraint(
+            component=CompatibilityComponent.TRANSPORT,
+            target="ros2",
+            requirement=">=1.0,<2.0",
+        ),
+        VersionConstraint(
+            component=CompatibilityComponent.BRIDGE,
+            target="<bridge_id>",
+            requirement=">=1.0,<2.0",
+            required=False,
+        ),
+        VersionConstraint(
+            component=CompatibilityComponent.WORKSPACE_SCHEMA,
+            target="workspace_asset_contract",
+            requirement=">=1.0,<2.0",
+        ),
     ),
 )
 
@@ -85,6 +132,8 @@ ADAPTER = AdapterBinding(
     supported_targets=("real",),
     bridge_id="<bridge_id>",
     lifecycle=LIFECYCLE,
+    degraded_modes=DEGRADED_MODES,
+    compatibility=COMPATIBILITY,
     notes=(
         "Workspace-specific adapter binding.",
     ),

@@ -2,10 +2,15 @@
 
 from roboclaw.embodied.execution.integration.adapters import (
     AdapterBinding,
+    AdapterCompatibilitySpec,
+    AdapterHealthMode,
     AdapterLifecycleContract,
     AdapterOperation,
     AdapterRegistry,
+    CompatibilityComponent,
+    DEFAULT_ADAPTER_COMPATIBILITY,
     DEFAULT_ADAPTER_LIFECYCLE,
+    DegradedModeSpec,
     DependencyKind,
     DependencySpec,
     EmbodiedAdapter,
@@ -13,6 +18,7 @@ from roboclaw.embodied.execution.integration.adapters import (
     ErrorCodeSpec,
     OperationTimeout,
     TimeoutPolicy,
+    VersionConstraint,
 )
 from roboclaw.embodied.execution.integration.bridges import (
     ARM_HAND_BRIDGE,
@@ -40,6 +46,8 @@ from roboclaw.embodied.execution.integration.transports import (
 
 __all__ = [
     "AdapterBinding",
+    "AdapterCompatibilitySpec",
+    "AdapterHealthMode",
     "AdapterLifecycleContract",
     "AdapterOperation",
     "AdapterRegistry",
@@ -47,9 +55,12 @@ __all__ = [
     "BridgeDomain",
     "BridgeKind",
     "BridgeRegistry",
+    "CompatibilityComponent",
     "ControlSurfaceSpec",
+    "DEFAULT_ADAPTER_COMPATIBILITY",
     "DEFAULT_ADAPTER_LIFECYCLE",
     "DEFAULT_DOMAIN_BRIDGES",
+    "DegradedModeSpec",
     "DependencyKind",
     "DependencySpec",
     "DRONE_BRIDGE",
@@ -68,6 +79,7 @@ __all__ = [
     "Ros2TopicSpec",
     "SIMULATOR_BRIDGE",
     "TimeoutPolicy",
+    "VersionConstraint",
     "build_standard_ros2_contract",
     "canonical_ros2_namespace",
 ]

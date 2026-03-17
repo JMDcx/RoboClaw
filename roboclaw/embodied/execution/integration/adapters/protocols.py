@@ -26,6 +26,12 @@ class EmbodiedAdapter(Protocol):
     async def ready(self) -> dict[str, Any]:
         """Return readiness state for command execution."""
 
+    async def health(self) -> dict[str, Any]:
+        """Return adapter health mode, including degraded state when applicable."""
+
+    async def check_compatibility(self) -> dict[str, Any]:
+        """Validate runtime component versions against compatibility constraints."""
+
     async def stop(self, *, scope: str = "all") -> dict[str, Any]:
         """Stop active tasks or motion."""
 

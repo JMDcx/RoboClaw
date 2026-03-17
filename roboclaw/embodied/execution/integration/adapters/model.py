@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from roboclaw.embodied.definition.foundation.schema import TransportKind
+from roboclaw.embodied.definition.foundation.schema import CapabilityFamily, TransportKind
 
 try:
     from enum import StrEnum
@@ -49,6 +49,28 @@ class ErrorCategory(StrEnum):
     COMMAND = "command"
     SAFETY = "safety"
     INTERNAL = "internal"
+    OTHER = "other"
+
+
+class AdapterHealthMode(StrEnum):
+    """Normalized adapter health mode."""
+
+    READY = "ready"
+    DEGRADED = "degraded"
+    MAINTENANCE = "maintenance"
+    TELEMETRY_ONLY = "telemetry_only"
+    UNAVAILABLE = "unavailable"
+
+
+class CompatibilityComponent(StrEnum):
+    """Component family referenced by compatibility constraints."""
+
+    TRANSPORT = "transport"
+    BRIDGE = "bridge"
+    WORKSPACE_SCHEMA = "workspace_schema"
+    ROBOT_SCHEMA = "robot_schema"
+    SENSOR_SCHEMA = "sensor_schema"
+    ADAPTER_RUNTIME = "adapter_runtime"
     OTHER = "other"
 
 
@@ -113,6 +135,74 @@ class ErrorCodeSpec:
     recoverable: bool = True
     retryable: bool = False
     related_operation: AdapterOperation | None = None
+
+
+@dataclass(frozen=True)
+class DegradedModeSpec:
+    """One allowed degraded mode and capability impact."""
+
+    mode: AdapterHealthMode
+    description: str
+    available_capabilities: tuple[CapabilityFamily, ...] = field(default_factory=tuple)
+    blocked_capabilities: tuple[CapabilityFamily, ...] = field(default_factory=tuple)
+    allowed_operations: tuple[AdapterOperation, ...] = field(default_factory=tuple)
+    entered_on_error_codes: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if self.mode == AdapterHealthMode.READY:
+            raise ValueError("Degraded mode spec cannot use AdapterHealthMode.READY.")
+        if not self.description.strip():
+            raise ValueError(f"Degraded mode '{self.mode.value}' description cannot be empty.")
+        overlap = set(self.available_capabilities) & set(self.blocked_capabilities)
+        if overlap:
+            names = ", ".join(sorted(item.value for item in overlap))
+            raise ValueError(
+                f"Degraded mode '{self.mode.value}' has capabilities both available and blocked: {names}."
+            )
+        for code in self.entered_on_error_codes:
+            if not code.strip():
+                raise ValueError(
+                    f"Degraded mode '{self.mode.value}' entered_on_error_codes cannot contain empty values."
+                )
+
+
+@dataclass(frozen=True)
+class VersionConstraint:
+    """Version requirement for one compatibility component."""
+
+    component: CompatibilityComponent
+    target: str
+    requirement: str
+    required: bool = True
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if not self.target.strip():
+            raise ValueError("Version constraint target cannot be empty.")
+        if not self.requirement.strip():
+            raise ValueError(f"Version constraint requirement for '{self.target}' cannot be empty.")
+
+
+@dataclass(frozen=True)
+class AdapterCompatibilitySpec:
+    """Compatibility/version contract for one adapter binding."""
+
+    adapter_api_version: str = "1.0"
+    constraints: tuple[VersionConstraint, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if not self.adapter_api_version.strip():
+            raise ValueError("Adapter compatibility adapter_api_version cannot be empty.")
+        keys = [(item.component, item.target) for item in self.constraints]
+        if len(set(keys)) != len(keys):
+            raise ValueError(
+                "Adapter compatibility constraints cannot contain duplicate component/target pairs."
+            )
+
+    def for_component(self, component: CompatibilityComponent) -> tuple[VersionConstraint, ...]:
+        """Return constraints for one component family."""
+
+        return tuple(item for item in self.constraints if item.component == component)
 
 
 _REQUIRED_ADAPTER_OPERATIONS = (
@@ -202,6 +292,9 @@ class AdapterLifecycleContract:
 DEFAULT_ADAPTER_LIFECYCLE = AdapterLifecycleContract()
 
 
+DEFAULT_ADAPTER_COMPATIBILITY = AdapterCompatibilitySpec()
+
+
 @dataclass(frozen=True)
 class AdapterBinding:
     """Static binding between an assembly and an implementation entrypoint."""
@@ -213,6 +306,10 @@ class AdapterBinding:
     supported_targets: tuple[str, ...]
     bridge_id: str | None = None
     lifecycle: AdapterLifecycleContract = field(default_factory=lambda: DEFAULT_ADAPTER_LIFECYCLE)
+    degraded_modes: tuple[DegradedModeSpec, ...] = field(default_factory=tuple)
+    compatibility: AdapterCompatibilitySpec = field(
+        default_factory=lambda: DEFAULT_ADAPTER_COMPATIBILITY
+    )
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -222,3 +319,31 @@ class AdapterBinding:
             raise ValueError(f"Adapter '{self.id}' has duplicate supported targets.")
         if self.bridge_id is not None and not self.bridge_id.strip():
             raise ValueError(f"Adapter '{self.id}' bridge_id cannot be empty when specified.")
+
+        transport_constraints = self.compatibility.for_component(CompatibilityComponent.TRANSPORT)
+        if not transport_constraints:
+            raise ValueError(
+                f"Adapter '{self.id}' compatibility must declare at least one transport constraint."
+            )
+        if self.bridge_id is not None:
+            bridge_constraints = tuple(
+                item
+                for item in self.compatibility.for_component(CompatibilityComponent.BRIDGE)
+                if item.target == self.bridge_id
+            )
+            if not bridge_constraints:
+                raise ValueError(
+                    f"Adapter '{self.id}' bridge_id '{self.bridge_id}' is missing a matching bridge compatibility constraint."
+                )
+
+        known_error_codes = {item.code for item in self.lifecycle.error_codes}
+        mode_ids = [mode.mode for mode in self.degraded_modes]
+        if len(set(mode_ids)) != len(mode_ids):
+            raise ValueError(f"Adapter '{self.id}' has duplicate degraded mode entries.")
+        for mode in self.degraded_modes:
+            unknown_codes = set(mode.entered_on_error_codes) - known_error_codes
+            if unknown_codes:
+                names = ", ".join(sorted(unknown_codes))
+                raise ValueError(
+                    f"Adapter '{self.id}' degraded mode '{mode.mode.value}' references unknown error codes: {names}."
+                )
