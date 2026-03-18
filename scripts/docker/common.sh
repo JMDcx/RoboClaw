@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ROBOCLAW_DOCKER_HOME="${ROBOCLAW_DOCKER_HOME:-${HOME}/.roboclaw-docker}"
+DEFAULT_DOCKER_PROFILE="${ROBOCLAW_DOCKER_PROFILE:-ubuntu2404}"
+DEFAULT_MATRIX_PROFILES="${ROBOCLAW_DOCKER_MATRIX_PROFILES:-ubuntu2204,ubuntu2204-ros2,ubuntu2404,ubuntu2404-ros2}"
 
 die() {
   echo "error: $*" >&2
@@ -16,14 +18,119 @@ require_instance() {
   [[ "${instance}" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid instance name: ${instance}"
 }
 
+docker_profile() {
+  local profile="${1:-${DEFAULT_DOCKER_PROFILE}}"
+  case "${profile}" in
+    ubuntu2204|ubuntu2204-ros2|ubuntu2404|ubuntu2404-ros2)
+      printf '%s\n' "${profile}"
+      ;;
+    *)
+      die "unknown docker profile: ${profile}"
+      ;;
+  esac
+}
+
+docker_profile_base_image() {
+  local profile
+  profile="$(docker_profile "${1:-}")"
+  case "${profile}" in
+    ubuntu2204|ubuntu2204-ros2)
+      printf '%s\n' "python:3.11-jammy"
+      ;;
+    ubuntu2404|ubuntu2404-ros2)
+      printf '%s\n' "python:3.11-noble"
+      ;;
+  esac
+}
+
+docker_profile_ros_distro() {
+  local profile
+  profile="$(docker_profile "${1:-}")"
+  case "${profile}" in
+    ubuntu2204-ros2)
+      printf '%s\n' "humble"
+      ;;
+    ubuntu2404-ros2)
+      printf '%s\n' "jazzy"
+      ;;
+    *)
+      printf '%s\n' "none"
+      ;;
+  esac
+}
+
+docker_profile_installs_ros2() {
+  local profile
+  profile="$(docker_profile "${1:-}")"
+  case "${profile}" in
+    *-ros2)
+      printf '%s\n' "1"
+      ;;
+    *)
+      printf '%s\n' "0"
+      ;;
+  esac
+}
+
+list_docker_profiles() {
+  printf '%s\n' ubuntu2204 ubuntu2204-ros2 ubuntu2404 ubuntu2404-ros2
+}
+
+parse_profile_flag() {
+  local profile="${DEFAULT_DOCKER_PROFILE}"
+  if [ "${1:-}" = "--profile" ]; then
+    [ -n "${2:-}" ] || die "missing value for --profile"
+    profile="$(docker_profile "${2}")"
+    shift 2
+  fi
+  printf '%s\n' "${profile}"
+}
+
+join_profiles_csv() {
+  local first=1
+  local profile
+  for profile in "$@"; do
+    if [ "${first}" -eq 1 ]; then
+      printf '%s' "${profile}"
+      first=0
+    else
+      printf ',%s' "${profile}"
+    fi
+  done
+  printf '\n'
+}
+
+split_profiles_csv() {
+  local csv="${1:-}"
+  [ -n "${csv}" ] || return 0
+  local old_ifs="${IFS}"
+  IFS=',' read -r -a _profiles <<< "${csv}"
+  IFS="${old_ifs}"
+  local profile
+  for profile in "${_profiles[@]}"; do
+    docker_profile "${profile}"
+  done
+}
+
+instance_key() {
+  local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf '%s--%s\n' "${instance}" "${profile}"
+}
+
 instance_dir() {
   local instance="${1}"
-  printf '%s\n' "${ROBOCLAW_DOCKER_HOME}/instances/${instance}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf '%s/instances/%s\n' "${ROBOCLAW_DOCKER_HOME}" "$(instance_key "${instance}" "${profile}")"
 }
 
 image_ref() {
   local instance="${1}"
-  printf 'roboclaw:%s-%s\n' "${instance}" "$(current_commit_short)"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf 'roboclaw:%s-%s-%s\n' "${instance}" "${profile}" "$(current_commit_short)"
 }
 
 current_commit_short() {
@@ -38,12 +145,16 @@ require_clean_git() {
 
 compose_project() {
   local instance="${1}"
-  printf 'roboclaw-%s\n' "${instance}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf 'roboclaw-%s-%s\n' "${instance}" "${profile}"
 }
 
 dev_container_name() {
   local instance="${1}"
-  printf 'roboclaw-dev-%s\n' "${instance}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf 'roboclaw-dev-%s-%s\n' "${instance}" "${profile}"
 }
 
 find_proxy_port() {
@@ -95,16 +206,20 @@ configure_proxy_env() {
 
 ensure_image_exists() {
   local instance="${1}"
-  docker image inspect "$(image_ref "${instance}")" >/dev/null 2>&1 || \
-    die "image $(image_ref "${instance}") not found; run scripts/docker/build-image.sh ${instance}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  docker image inspect "$(image_ref "${instance}" "${profile}")" >/dev/null 2>&1 || \
+    die "image $(image_ref "${instance}" "${profile}") not found; run scripts/docker/build-image.sh --profile ${profile} ${instance}"
 }
 
 ensure_instance_dir() {
   local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
   mkdir -p \
-    "$(instance_dir "${instance}")/workspace" \
-    "$(instance_dir "${instance}")/home" \
-    "$(instance_dir "${instance}")/home/.codex"
+    "$(instance_dir "${instance}" "${profile}")/workspace" \
+    "$(instance_dir "${instance}" "${profile}")/home" \
+    "$(instance_dir "${instance}" "${profile}")/home/.codex"
 }
 
 host_codex_auth_path() {
@@ -116,22 +231,25 @@ host_codex_auth_path() {
 
 compose_cmd() {
   local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  shift
   shift
   if docker compose version >/dev/null 2>&1; then
-    ROBOCLAW_IMAGE="$(image_ref "${instance}")" \
-    ROBOCLAW_INSTANCE_DIR="$(instance_dir "${instance}")" \
+    ROBOCLAW_IMAGE="$(image_ref "${instance}" "${profile}")" \
+    ROBOCLAW_INSTANCE_DIR="$(instance_dir "${instance}" "${profile}")" \
     ROBOCLAW_UID="$(id -u)" \
     ROBOCLAW_GID="$(id -g)" \
-    docker compose -f "${REPO_ROOT}/docker-compose.yml" -p "$(compose_project "${instance}")" "$@"
+    docker compose -f "${REPO_ROOT}/docker-compose.yml" -p "$(compose_project "${instance}" "${profile}")" "$@"
     return
   fi
 
   if command -v docker-compose >/dev/null 2>&1; then
-    ROBOCLAW_IMAGE="$(image_ref "${instance}")" \
-    ROBOCLAW_INSTANCE_DIR="$(instance_dir "${instance}")" \
+    ROBOCLAW_IMAGE="$(image_ref "${instance}" "${profile}")" \
+    ROBOCLAW_INSTANCE_DIR="$(instance_dir "${instance}" "${profile}")" \
     ROBOCLAW_UID="$(id -u)" \
     ROBOCLAW_GID="$(id -g)" \
-    docker-compose -f "${REPO_ROOT}/docker-compose.yml" -p "$(compose_project "${instance}")" "$@"
+    docker-compose -f "${REPO_ROOT}/docker-compose.yml" -p "$(compose_project "${instance}" "${profile}")" "$@"
     return
   fi
 

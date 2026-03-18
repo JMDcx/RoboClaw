@@ -5,11 +5,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+PROFILE="${DEFAULT_DOCKER_PROFILE}"
+if [ "${1:-}" = "--profile" ]; then
+  [ -n "${2:-}" ] || die "missing value for --profile"
+  PROFILE="$(docker_profile "${2}")"
+  shift 2
+fi
+
 INSTANCE="${1:-}"
 shift || true
 require_instance "${INSTANCE}"
-ensure_image_exists "${INSTANCE}"
-ensure_instance_dir "${INSTANCE}"
+ensure_image_exists "${INSTANCE}" "${PROFILE}"
+ensure_instance_dir "${INSTANCE}" "${PROFILE}"
 configure_proxy_env
 AUTH_PATH="$(host_codex_auth_path || true)"
 
@@ -17,7 +24,7 @@ if [ "$#" -eq 0 ]; then
   set -- status
 fi
 
-"${SCRIPT_DIR}/bootstrap-instance.sh" "${INSTANCE}"
+"${SCRIPT_DIR}/bootstrap-instance.sh" --profile "${PROFILE}" "${INSTANCE}"
 
 DOCKER_ARGS=(
   --rm
@@ -32,7 +39,7 @@ DOCKER_ARGS=(
   -e http_proxy="${http_proxy:-}"
   -e https_proxy="${https_proxy:-}"
   -e all_proxy="${all_proxy:-}"
-  -v "$(instance_dir "${INSTANCE}"):/roboclaw-instance"
+  -v "$(instance_dir "${INSTANCE}" "${PROFILE}"):/roboclaw-instance"
 )
 
 if [ -n "${AUTH_PATH}" ]; then
@@ -40,5 +47,5 @@ if [ -n "${AUTH_PATH}" ]; then
 fi
 
 docker run "${DOCKER_ARGS[@]}" \
-  "$(image_ref "${INSTANCE}")" \
+  "$(image_ref "${INSTANCE}" "${PROFILE}")" \
   "$@"

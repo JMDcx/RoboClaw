@@ -5,11 +5,18 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+PROFILE="${DEFAULT_DOCKER_PROFILE}"
+if [ "${1:-}" = "--profile" ]; then
+  [ -n "${2:-}" ] || die "missing value for --profile"
+  PROFILE="$(docker_profile "${2}")"
+  shift 2
+fi
+
 INSTANCE="${1:-}"
 require_instance "${INSTANCE}"
-ensure_image_exists "${INSTANCE}"
-ensure_instance_dir "${INSTANCE}"
+ensure_image_exists "${INSTANCE}" "${PROFILE}"
+ensure_instance_dir "${INSTANCE}" "${PROFILE}"
 configure_proxy_env
 
-"${SCRIPT_DIR}/start-dev.sh" "${INSTANCE}" >/dev/null
-docker exec -it "$(dev_container_name "${INSTANCE}")" /bin/sh
+"${SCRIPT_DIR}/start-dev.sh" --profile "${PROFILE}" "${INSTANCE}" >/dev/null
+docker exec -it "$(dev_container_name "${INSTANCE}" "${PROFILE}")" /bin/sh

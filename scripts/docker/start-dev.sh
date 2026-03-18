@@ -5,15 +5,22 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+PROFILE="${DEFAULT_DOCKER_PROFILE}"
+if [ "${1:-}" = "--profile" ]; then
+  [ -n "${2:-}" ] || die "missing value for --profile"
+  PROFILE="$(docker_profile "${2}")"
+  shift 2
+fi
+
 INSTANCE="${1:-}"
 require_instance "${INSTANCE}"
-ensure_image_exists "${INSTANCE}"
-ensure_instance_dir "${INSTANCE}"
+ensure_image_exists "${INSTANCE}" "${PROFILE}"
+ensure_instance_dir "${INSTANCE}" "${PROFILE}"
 configure_proxy_env
 
-"${SCRIPT_DIR}/bootstrap-instance.sh" "${INSTANCE}"
-CONTAINER_NAME="$(dev_container_name "${INSTANCE}")"
-TARGET_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$(image_ref "${INSTANCE}")")"
+"${SCRIPT_DIR}/bootstrap-instance.sh" --profile "${PROFILE}" "${INSTANCE}"
+CONTAINER_NAME="$(dev_container_name "${INSTANCE}" "${PROFILE}")"
+TARGET_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$(image_ref "${INSTANCE}" "${PROFILE}")")"
 AUTH_PATH="$(host_codex_auth_path || true)"
 
 DOCKER_ARGS=(
@@ -31,7 +38,7 @@ DOCKER_ARGS=(
   -e http_proxy="${http_proxy:-}"
   -e https_proxy="${https_proxy:-}"
   -e all_proxy="${all_proxy:-}"
-  -v "$(instance_dir "${INSTANCE}"):/roboclaw-instance"
+  -v "$(instance_dir "${INSTANCE}" "${PROFILE}"):/roboclaw-instance"
 )
 
 if [ -n "${AUTH_PATH}" ]; then
@@ -44,20 +51,23 @@ if docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
     docker rm -f "${CONTAINER_NAME}" >/dev/null
   elif [ "$(docker container inspect --format '{{.State.Running}}' "${CONTAINER_NAME}")" = "true" ]; then
     echo "started dev container for instance ${INSTANCE}"
-    echo "enter it with: ${SCRIPT_DIR}/exec-dev.sh ${INSTANCE}"
+    echo "profile: ${PROFILE}"
+    echo "enter it with: ${SCRIPT_DIR}/exec-dev.sh --profile ${PROFILE} ${INSTANCE}"
     exit 0
   else
     docker start "${CONTAINER_NAME}" >/dev/null
     echo "started dev container for instance ${INSTANCE}"
-    echo "enter it with: ${SCRIPT_DIR}/exec-dev.sh ${INSTANCE}"
+    echo "profile: ${PROFILE}"
+    echo "enter it with: ${SCRIPT_DIR}/exec-dev.sh --profile ${PROFILE} ${INSTANCE}"
     exit 0
   fi
 fi
 
 docker run "${DOCKER_ARGS[@]}" \
   --entrypoint sleep \
-  "$(image_ref "${INSTANCE}")" \
+  "$(image_ref "${INSTANCE}" "${PROFILE}")" \
   infinity >/dev/null
 
 echo "started dev container for instance ${INSTANCE}"
-echo "enter it with: ${SCRIPT_DIR}/exec-dev.sh ${INSTANCE}"
+echo "profile: ${PROFILE}"
+echo "enter it with: ${SCRIPT_DIR}/exec-dev.sh --profile ${PROFILE} ${INSTANCE}"
