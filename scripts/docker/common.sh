@@ -229,6 +229,39 @@ host_codex_auth_path() {
   fi
 }
 
+host_oauth_cli_kit_auth_dir() {
+  local path="${HOME}/.local/share/oauth-cli-kit/auth"
+  if [ -d "${path}" ]; then
+    printf '%s\n' "${path}"
+  fi
+}
+
+instance_oauth_cli_kit_auth_dir() {
+  local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf '%s/home/.local/share/oauth-cli-kit/auth\n' "$(instance_dir "${instance}" "${profile}")"
+}
+
+prepare_auth_mounts() {
+  local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  local codex_auth_path oauth_dir instance_oauth_dir
+  codex_auth_path="$(host_codex_auth_path || true)"
+  oauth_dir="$(host_oauth_cli_kit_auth_dir || true)"
+  instance_oauth_dir="$(instance_oauth_cli_kit_auth_dir "${instance}" "${profile}")"
+
+  mkdir -p "${instance_oauth_dir}"
+
+  if [ -n "${oauth_dir}" ]; then
+    rm -f "${instance_oauth_dir}/codex.json"
+  elif [ -n "${codex_auth_path}" ]; then
+    rm -rf "${instance_oauth_dir}"
+    mkdir -p "${instance_oauth_dir}"
+  fi
+}
+
 compose_cmd() {
   local instance="${1}"
   local profile

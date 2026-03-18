@@ -17,11 +17,13 @@ require_instance "${INSTANCE}"
 ensure_image_exists "${INSTANCE}" "${PROFILE}"
 ensure_instance_dir "${INSTANCE}" "${PROFILE}"
 configure_proxy_env
+prepare_auth_mounts "${INSTANCE}" "${PROFILE}"
 
 "${SCRIPT_DIR}/bootstrap-instance.sh" --profile "${PROFILE}" "${INSTANCE}"
 CONTAINER_NAME="$(dev_container_name "${INSTANCE}" "${PROFILE}")"
 TARGET_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$(image_ref "${INSTANCE}" "${PROFILE}")")"
 AUTH_PATH="$(host_codex_auth_path || true)"
+OAUTH_CLI_KIT_AUTH_DIR="$(host_oauth_cli_kit_auth_dir || true)"
 
 DOCKER_ARGS=(
   -d
@@ -43,6 +45,10 @@ DOCKER_ARGS=(
 
 if [ -n "${AUTH_PATH}" ]; then
   DOCKER_ARGS+=(-v "${AUTH_PATH}:/roboclaw-instance/home/.codex/auth.json:ro")
+fi
+
+if [ -n "${OAUTH_CLI_KIT_AUTH_DIR}" ]; then
+  DOCKER_ARGS+=(-v "${OAUTH_CLI_KIT_AUTH_DIR}:/roboclaw-instance/home/.local/share/oauth-cli-kit/auth")
 fi
 
 if docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
