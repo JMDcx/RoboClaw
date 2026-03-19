@@ -13,6 +13,18 @@ die() {
   exit 1
 }
 
+host_python_cmd() {
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "python3"
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    printf '%s\n' "python"
+    return 0
+  fi
+  die "python3 or python is required on the host"
+}
+
 require_instance() {
   local instance="${1:-}"
   [ -n "${instance}" ] || die "instance name is required"
@@ -278,15 +290,16 @@ prepare_instance_calibration() {
   local instance="${1}"
   local profile
   profile="$(docker_profile "${2:-}")"
-  local native_seed_dir legacy_seed_dir instance_calibration_dir
+  local native_seed_dir legacy_seed_dir instance_calibration_dir host_python
   native_seed_dir="$(host_native_calibration_dir || true)"
   legacy_seed_dir="$(host_legacy_calibration_dir || true)"
   instance_calibration_dir="$(instance_calibration_dir "${instance}" "${profile}")"
+  host_python="$(host_python_cmd)"
 
   mkdir -p "${instance_calibration_dir}"
 
   if [ -n "${native_seed_dir}" ] && [ -z "$(find "${instance_calibration_dir}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-    python - "${native_seed_dir}" "${instance_calibration_dir}" <<'PY'
+    "${host_python}" - "${native_seed_dir}" "${instance_calibration_dir}" <<'PY'
 from pathlib import Path
 import shutil
 import sys
@@ -304,7 +317,7 @@ PY
   fi
 
   if [ -n "${legacy_seed_dir}" ] && [ -z "$(find "${instance_calibration_dir}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-    python - "${legacy_seed_dir}" "${instance_calibration_dir}" <<'PY'
+    "${host_python}" - "${legacy_seed_dir}" "${instance_calibration_dir}" <<'PY'
 from pathlib import Path
 import shutil
 import sys
