@@ -1,5 +1,10 @@
 # RoboClaw Installation Guide
 
+This guide is the native host installation path. If you want Docker-based workflows, use:
+
+- [Docker Dev Workflow](./docs/docker-workflow.md)
+- [Docker Validation Workflow](./docs/docker-validation.md)
+
 ## 1. Prerequisites
 
 Start from a clean clone:
@@ -26,6 +31,11 @@ roboclaw --help
 Expected result:
 
 - commands such as `onboard`, `status`, `agent`, and `provider` are listed
+
+For SO101 embodied control, make sure calibration data is available under
+`~/.roboclaw/calibration/so101/`. The RoboClaw install now includes the Python
+`scservo_sdk` dependency bundle directly, so native users should get the same
+driver module that Docker uses.
 
 ## 3. Step 2: Initialize RoboClaw
 

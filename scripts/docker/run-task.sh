@@ -19,10 +19,7 @@ ensure_image_exists "${INSTANCE}" "${PROFILE}"
 ensure_instance_dir "${INSTANCE}" "${PROFILE}"
 configure_proxy_env
 prepare_auth_mounts "${INSTANCE}" "${PROFILE}"
-AUTH_PATH="$(host_codex_auth_path || true)"
-OAUTH_CLI_KIT_AUTH_DIR="$(host_oauth_cli_kit_auth_dir || true)"
-LEROBOT_CALIBRATION_DIR="$(host_lerobot_calibration_dir || true)"
-SCSERVO_SDK_DIR="$(host_scservo_sdk_dir || true)"
+prepare_instance_calibration "${INSTANCE}" "${PROFILE}"
 
 if [ "$#" -eq 0 ]; then
   set -- status
@@ -38,6 +35,8 @@ DOCKER_ARGS=(
   -e ROBOCLAW_CONFIG_PATH=/roboclaw-instance/config.json
   -e ROBOCLAW_WORKSPACE_PATH=/roboclaw-instance/workspace
   -e ROBOCLAW_ROS2_NAMESPACE_PREFIX="$(ros2_namespace_prefix "${INSTANCE}" "${PROFILE}")"
+  -e ROBOCLAW_ROS2_CONTROL_PYTHON="/usr/bin/python3"
+  -e ROBOCLAW_ROS2_CONTROL_PYTHONPATH="/usr/local/lib/python${ROBOCLAW_PYTHON_VERSION}/dist-packages:/app"
   -e HTTP_PROXY="${HTTP_PROXY:-}"
   -e HTTPS_PROXY="${HTTPS_PROXY:-}"
   -e ALL_PROXY="${ALL_PROXY:-}"
@@ -53,14 +52,6 @@ fi
 
 if [ -n "${OAUTH_CLI_KIT_AUTH_DIR}" ]; then
   DOCKER_ARGS+=(-v "${OAUTH_CLI_KIT_AUTH_DIR}:/roboclaw-instance/home/.local/share/oauth-cli-kit/auth")
-fi
-
-if [ -n "${LEROBOT_CALIBRATION_DIR}" ]; then
-  DOCKER_ARGS+=(-v "${LEROBOT_CALIBRATION_DIR}:/roboclaw-instance/home/.cache/huggingface/lerobot/calibration:ro")
-fi
-
-if [ -n "${SCSERVO_SDK_DIR}" ]; then
-  DOCKER_ARGS+=(-v "${SCSERVO_SDK_DIR}:/usr/local/lib/python3.11/dist-packages/scservo_sdk:ro")
 fi
 
 append_hardware_device_args DOCKER_ARGS

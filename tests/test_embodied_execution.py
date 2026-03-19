@@ -147,6 +147,7 @@ def _write_setup_assets(root: Path, setup_id: str, *, launch_command: str | None
         "        'ros_distro': 'jazzy',",
         "        'profile_id': 'so101_ros2_standard',",
         f"        'namespace': {namespace!r},",
+        "        'serial_device_by_id': '/dev/serial/by-id/usb-so101',",
     ]
     if launch_command is not None:
         connection_lines.append(f"        'launch_command': {launch_command!r},")
@@ -178,7 +179,7 @@ def _write_setup_assets(root: Path, setup_id: str, *, launch_command: str | None
                 *connection_lines,
                 "    },",
                 "    robots={",
-                "        'primary': {'serial_device': '/dev/ttyACM0'},",
+                "        'primary': {'serial_device_by_id': '/dev/serial/by-id/usb-so101'},",
                 "    },",
                 "    sensors={},",
                 "    safety_overrides={},",
@@ -412,7 +413,7 @@ async def test_adapter_ignores_unrelated_ros_nodes_when_required_interfaces_are_
 
 
 @pytest.mark.asyncio
-async def test_stage1_profile_can_fallback_to_primitive_services_without_action(tmp_path: Path) -> None:
+async def test_control_bridge_profile_can_fallback_to_primitive_services_without_action(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     _write_setup_assets(tmp_path, "so101_setup")
     namespace = canonical_ros2_namespace("so101_setup", "real")

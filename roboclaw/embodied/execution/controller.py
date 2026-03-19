@@ -25,7 +25,7 @@ EMBODIED_RUNTIME_STATE_KEY = "embodied_runtime"
 
 @dataclass(frozen=True)
 class EmbodiedIntent:
-    """One normalized stage-1 execution intent."""
+    """One normalized control execution intent."""
 
     kind: ProcedureKind
     primitive_name: str | None = None

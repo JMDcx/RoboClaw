@@ -1,4 +1,4 @@
-"""Standard ROS2 adapter implementation for stage-1 embodied execution."""
+"""Standard ROS2 adapter implementation for control bridge embodied execution."""
 
 from __future__ import annotations
 
@@ -269,7 +269,7 @@ class Ros2ActionServiceAdapter:
                     requirement=constraint.requirement,
                     satisfied=satisfied,
                     required=constraint.required,
-                    detected_version="stage1",
+                    detected_version="control_bridge",
                     message=message,
                 )
             )

@@ -7,16 +7,8 @@ SCRIPT_DIR="$(pwd)/scripts/docker"
 # shellcheck source=../scripts/docker/common.sh
 source "${SCRIPT_DIR}/common.sh"
 
-echo "=== Building Docker image ==="
-"${SCRIPT_DIR}/build-image.sh" "$INSTANCE_NAME"
-
-echo ""
-echo "=== Bootstrapping instance ==="
-"${SCRIPT_DIR}/bootstrap-instance.sh" "$INSTANCE_NAME"
-
-echo ""
-echo "=== Running 'roboclaw status' ==="
-STATUS_OUTPUT=$("${SCRIPT_DIR}/run-task.sh" "$INSTANCE_NAME" status 2>&1) || true
+echo "=== Running Docker matrix validation smoke ==="
+STATUS_OUTPUT=$("${SCRIPT_DIR}/matrix.sh" run-task "${INSTANCE_NAME}" -- status 2>&1) || true
 
 echo "$STATUS_OUTPUT"
 
@@ -33,6 +25,8 @@ check() {
     fi
 }
 
+check "ubuntu2204-ros2 :: success"
+check "ubuntu2404-ros2 :: success"
 check "RoboClaw Status"
 check "Config:"
 check "Workspace:"
@@ -45,10 +39,11 @@ else
     exit 1
 fi
 
-# Cleanup
 echo ""
 echo "=== Cleanup ==="
-docker rm -f "$(dev_container_name "$INSTANCE_NAME")" 2>/dev/null || true
-docker rmi -f "$(image_ref "$INSTANCE_NAME")" 2>/dev/null || true
-rm -rf "$(instance_dir "$INSTANCE_NAME")"
+while IFS= read -r profile; do
+    [ -n "$profile" ] || continue
+    rm -rf "$(instance_dir "$INSTANCE_NAME" "$profile")"
+done < <(split_profiles_csv "${DEFAULT_MATRIX_PROFILES}")
+rm -rf "${ROBOCLAW_DOCKER_HOME}/matrix-logs/${INSTANCE_NAME}-"*
 echo "Done."

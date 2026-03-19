@@ -14,18 +14,24 @@ fi
 
 INSTANCE="${1:-}"
 require_instance "${INSTANCE}"
-ensure_image_exists "${INSTANCE}" "${PROFILE}"
 ensure_instance_dir "${INSTANCE}" "${PROFILE}"
 configure_proxy_env
 prepare_auth_mounts "${INSTANCE}" "${PROFILE}"
 
+TARGET_IMAGE="$(dev_image_ref "${INSTANCE}" "${PROFILE}")"
+if ! docker image inspect "${TARGET_IMAGE}" >/dev/null 2>&1; then
+  if ! docker image inspect "$(image_ref "${INSTANCE}" "${PROFILE}")" >/dev/null 2>&1; then
+    "${SCRIPT_DIR}/build-image.sh" --profile "${PROFILE}" "${INSTANCE}"
+  fi
+  docker tag "$(image_ref "${INSTANCE}" "${PROFILE}")" "${TARGET_IMAGE}"
+fi
+
 "${SCRIPT_DIR}/bootstrap-instance.sh" --profile "${PROFILE}" "${INSTANCE}"
 CONTAINER_NAME="$(dev_container_name "${INSTANCE}" "${PROFILE}")"
-TARGET_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$(image_ref "${INSTANCE}" "${PROFILE}")")"
+TARGET_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${TARGET_IMAGE}")"
 AUTH_PATH="$(host_codex_auth_path || true)"
 OAUTH_CLI_KIT_AUTH_DIR="$(host_oauth_cli_kit_auth_dir || true)"
-LEROBOT_CALIBRATION_DIR="$(host_lerobot_calibration_dir || true)"
-SCSERVO_SDK_DIR="$(host_scservo_sdk_dir || true)"
+SOURCE_PYTHONPATH="/roboclaw-source:/usr/local/lib/python${ROBOCLAW_PYTHON_VERSION}/dist-packages:/app"
 
 DOCKER_ARGS=(
   -d
@@ -37,6 +43,9 @@ DOCKER_ARGS=(
   -e ROBOCLAW_CONFIG_PATH=/roboclaw-instance/config.json
   -e ROBOCLAW_WORKSPACE_PATH=/roboclaw-instance/workspace
   -e ROBOCLAW_ROS2_NAMESPACE_PREFIX="$(ros2_namespace_prefix "${INSTANCE}" "${PROFILE}")"
+  -e ROBOCLAW_ROS2_CONTROL_PYTHON="/usr/bin/python3"
+  -e ROBOCLAW_ROS2_CONTROL_PYTHONPATH="${SOURCE_PYTHONPATH}"
+  -e PYTHONPATH="${SOURCE_PYTHONPATH}"
   -e HTTP_PROXY="${HTTP_PROXY:-}"
   -e HTTPS_PROXY="${HTTPS_PROXY:-}"
   -e ALL_PROXY="${ALL_PROXY:-}"
@@ -44,6 +53,7 @@ DOCKER_ARGS=(
   -e https_proxy="${https_proxy:-}"
   -e all_proxy="${all_proxy:-}"
   -v "$(instance_dir "${INSTANCE}" "${PROFILE}"):/roboclaw-instance"
+  -v "${REPO_ROOT}:/roboclaw-source"
 )
 
 if [ -n "${AUTH_PATH}" ]; then
@@ -52,14 +62,6 @@ fi
 
 if [ -n "${OAUTH_CLI_KIT_AUTH_DIR}" ]; then
   DOCKER_ARGS+=(-v "${OAUTH_CLI_KIT_AUTH_DIR}:/roboclaw-instance/home/.local/share/oauth-cli-kit/auth")
-fi
-
-if [ -n "${LEROBOT_CALIBRATION_DIR}" ]; then
-  DOCKER_ARGS+=(-v "${LEROBOT_CALIBRATION_DIR}:/roboclaw-instance/home/.cache/huggingface/lerobot/calibration:ro")
-fi
-
-if [ -n "${SCSERVO_SDK_DIR}" ]; then
-  DOCKER_ARGS+=(-v "${SCSERVO_SDK_DIR}:/usr/local/lib/python3.11/dist-packages/scservo_sdk:ro")
 fi
 
 append_hardware_device_args DOCKER_ARGS
@@ -84,7 +86,7 @@ fi
 
 docker run "${DOCKER_ARGS[@]}" \
   --entrypoint sleep \
-  "$(image_ref "${INSTANCE}" "${PROFILE}")" \
+  "${TARGET_IMAGE}" \
   infinity >/dev/null
 
 echo "started dev container for instance ${INSTANCE}"

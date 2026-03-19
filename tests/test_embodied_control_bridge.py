@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from roboclaw.embodied.execution.integration.bridges.ros2.control_bridge import Ros2ControlBridgeServer
 from roboclaw.embodied.execution.integration.bridges.ros2.scservo import ServoCalibration
 from roboclaw.embodied.execution.integration.bridges.ros2.so101_feetech import (
     ADDR_HOMING_OFFSET,
@@ -9,30 +10,29 @@ from roboclaw.embodied.execution.integration.bridges.ros2.so101_feetech import (
     ADDR_MIN_POSITION_LIMIT,
     So101FeetechRuntime,
 )
-from roboclaw.embodied.execution.integration.bridges.ros2.stage1_server import Stage1Ros2BridgeServer
 
 
-def test_stage1_server_rejects_unknown_robot_even_when_profile_matches() -> None:
-    server = Stage1Ros2BridgeServer.__new__(Stage1Ros2BridgeServer)
+def test_control_bridge_server_rejects_unknown_robot_even_when_profile_matches() -> None:
+    server = Ros2ControlBridgeServer.__new__(Ros2ControlBridgeServer)
 
-    with pytest.raises(ValueError, match="Unknown stage-1 ROS2 robot"):
+    with pytest.raises(ValueError, match="Unknown control bridge ROS2 robot"):
         server._build_runtime(
             profile_id="so101_ros2_standard",
             robot_id="custom_arm",
-            device="/dev/ttyACM0",
+            device_by_id="/dev/serial/by-id/usb-so101",
             calibration_path=None,
             calibration_id="so101_real",
         )
 
 
-def test_stage1_server_rejects_unknown_profile_even_when_robot_matches() -> None:
-    server = Stage1Ros2BridgeServer.__new__(Stage1Ros2BridgeServer)
+def test_control_bridge_server_rejects_unknown_profile_even_when_robot_matches() -> None:
+    server = Ros2ControlBridgeServer.__new__(Ros2ControlBridgeServer)
 
-    with pytest.raises(ValueError, match="Unknown stage-1 ROS2 profile"):
+    with pytest.raises(ValueError, match="Unknown control bridge ROS2 profile"):
         server._build_runtime(
             profile_id="custom_profile",
             robot_id="so101",
-            device="/dev/ttyACM0",
+            device_by_id="/dev/serial/by-id/usb-so101",
             calibration_path=None,
             calibration_id="so101_real",
         )

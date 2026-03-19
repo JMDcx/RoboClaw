@@ -31,6 +31,7 @@ from roboclaw.embodied.onboarding.ros2_install import (
     select_ros2_recipe,
 )
 from roboclaw.embodied.workspace import WorkspaceInspectOptions, WorkspaceLintProfile, inspect_workspace_assets
+from roboclaw.config.paths import resolve_serial_by_id_path
 from roboclaw.session.manager import Session
 
 ProgressCallback = Callable[[str], Awaitable[None]]
@@ -151,9 +152,17 @@ class OnboardingController:
             changed = True
 
         serial_path = self._extract_serial_path(content)
-        if serial_path and facts.get("serial_device") != serial_path:
-            facts["serial_device"] = serial_path
-            changed = True
+        if serial_path:
+            serial_by_id = self._normalize_serial_device_by_id(serial_path)
+            if serial_by_id is not None and facts.get("serial_device_by_id") != serial_by_id:
+                facts["serial_device_by_id"] = serial_by_id
+                facts.pop("serial_device_unstable", None)
+                changed = True
+            elif serial_by_id is None:
+                if facts.get("serial_device_unstable") is not True:
+                    facts["serial_device_unstable"] = True
+                    facts.pop("serial_device_by_id", None)
+                    changed = True
 
         ros2_profile = extract_ros2_profile(content)
         if ros2_profile and facts.get("ros2_install_profile") != ros2_profile:
@@ -306,6 +315,7 @@ class OnboardingController:
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> dict[str, Any]:
         state = await self._write_intake(state, on_progress=on_progress)
+        primary_profile = self._primary_profile(state)
 
         if not state.robot_attachments:
             next_state = replace(
@@ -323,18 +333,18 @@ class OnboardingController:
                 ),
             }
 
-        if self._primary_profile(state) is None:
+        if primary_profile is None:
             primary_robot_id = state.robot_attachments[0]["robot_id"]
             next_state = replace(
                 state,
                 stage=SetupStage.IDENTIFY_SETUP_SCOPE,
                 status=SetupStatus.BOOTSTRAPPING,
-                missing_facts=["stage1_execution_profile"],
+                missing_facts=["control_execution_profile"],
             )
             return {
                 "state": next_state,
                 "content": (
-                    f"RoboClaw does not have a framework ROS2 stage-1 execution profile for `{primary_robot_id}` yet."
+                    f"RoboClaw does not have a framework ROS2 control bridge profile for `{primary_robot_id}` yet."
                     "\nThis onboarding flow will not generate a standard ROS2 deployment/adapter until that profile exists."
                     "\nSwitch to a supported robot profile or add an embodiment-owned profile/bridge first."
                 ),
@@ -358,6 +368,20 @@ class OnboardingController:
 
         if state.stage in (SetupStage.CONFIRM_CONNECTED, SetupStage.IDENTIFY_SETUP_SCOPE, SetupStage.PROBE_LOCAL_ENVIRONMENT):
             state = await self._probe_environment(state, on_progress=on_progress)
+            if primary_profile is not None and primary_profile.auto_probe_serial and not state.detected_facts.get("serial_device_by_id"):
+                next_state = replace(
+                    state,
+                    stage=SetupStage.PROBE_LOCAL_ENVIRONMENT,
+                    status=SetupStatus.BOOTSTRAPPING,
+                    missing_facts=["serial_device_by_id"],
+                )
+                return {
+                    "state": next_state,
+                    "content": (
+                        "I found a serial device, but I will not persist an unstable tty node."
+                        "\nPlease expose a stable `/dev/serial/by-id/...` mapping for the SO101 controller, then reply again."
+                    ),
+                }
             if (
                 state.detected_facts.get("ros2_available") is not True
                 and state.detected_facts.get("ros2_installed_distros")
@@ -514,18 +538,27 @@ class OnboardingController:
         facts = dict(state.detected_facts)
         primary_robot_id = state.robot_attachments[0]["robot_id"] if state.robot_attachments else None
         primary_profile = get_ros2_profile(primary_robot_id)
-        if primary_profile is not None and primary_profile.auto_probe_serial and not facts.get("serial_device"):
+        if primary_profile is not None and primary_profile.auto_probe_serial and not facts.get("serial_device_by_id"):
             probe = await self._run_tool(
                 "exec",
                 {
                     "command": (
-                        "bash -lc 'ls -1 /dev/serial/by-id 2>/dev/null; "
+                        "bash -lc 'for link in /dev/serial/by-id/*; do "
+                        "[ -e \"$link\" ] || continue; "
+                        "printf \"%s -> %s\\n\" \"$link\" \"$(readlink -f \"$link\")\"; "
+                        "done; "
                         "ls -1 /dev/ttyACM* /dev/ttyUSB* 2>/dev/null'"
                     )
                 },
                 on_progress=on_progress,
             )
-            facts["serial_device"] = self._select_serial_device(probe)
+            serial_by_id = self._select_serial_device_by_id(probe)
+            if serial_by_id is not None:
+                facts["serial_device_by_id"] = serial_by_id
+                facts.pop("serial_device_unstable", None)
+            else:
+                facts.pop("serial_device_by_id", None)
+                facts["serial_device_unstable"] = True
         if force_ros2_probe or "ros2_available" not in facts:
             probe = await self._run_tool(
                 "exec",
@@ -569,8 +602,8 @@ class OnboardingController:
             else:
                 facts.pop("ros2_installed_distros", None)
         notes = list(state.notes)
-        if facts.get("serial_device"):
-            notes = self._extend_unique(notes, f"probe:serial={facts['serial_device']}")
+        if facts.get("serial_device_by_id"):
+            notes = self._extend_unique(notes, f"probe:serial={facts['serial_device_by_id']}")
         if facts.get("ros2_distro"):
             notes = self._extend_unique(notes, f"probe:ros2={facts['ros2_distro']}")
         return replace(state, stage=SetupStage.PROBE_LOCAL_ENVIRONMENT, detected_facts=facts, notes=notes)
@@ -749,16 +782,24 @@ class OnboardingController:
         return None
 
     @staticmethod
-    def _select_serial_device(output: str) -> str | None:
+    def _select_serial_device_by_id(output: str) -> str | None:
         for line in output.splitlines():
             candidate = line.strip()
             if candidate.startswith("/dev/serial/by-id/"):
-                return candidate
-        for line in output.splitlines():
-            candidate = line.strip()
-            if candidate.startswith("/dev/ttyACM") or candidate.startswith("/dev/ttyUSB"):
+                if "->" in candidate:
+                    candidate = candidate.split("->", 1)[0].strip()
                 return candidate
         return None
+
+    @staticmethod
+    def _normalize_serial_device_by_id(device_path: str) -> str | None:
+        candidate = device_path.strip()
+        if not candidate:
+            return None
+        serial_by_id = resolve_serial_by_id_path(candidate)
+        if serial_by_id is None:
+            return None
+        return str(serial_by_id)
 
     def _render_intake(self, state: SetupOnboardingState) -> str:
         robot_lines = "\n".join(
@@ -770,7 +811,8 @@ class OnboardingController:
         facts = state.detected_facts
         fact_lines = [
             f"- connected: `{facts.get('connected', 'unknown')}`",
-            f"- serial_device: `{facts.get('serial_device', 'unknown')}`",
+            f"- serial_device_by_id: `{facts.get('serial_device_by_id', 'unknown')}`",
+            f"- serial_device_unstable: `{facts.get('serial_device_unstable', 'unknown')}`",
             f"- ros2_available: `{facts.get('ros2_available', 'unknown')}`",
             f"- ros2_distro: `{facts.get('ros2_distro', 'unknown')}`",
             f"- host_pretty_name: `{facts.get('host_pretty_name', 'unknown')}`",
@@ -913,7 +955,7 @@ class OnboardingController:
                 "\n".join(
                     [
                         f"        {item['attachment_id']!r}: {{",
-                        f"            'serial_device': {facts.get('serial_device')!r},",
+                        f"            'serial_device_by_id': {facts.get('serial_device_by_id')!r},",
                         f"            'namespace': {item['attachment_id']!r},",
                         "        },",
                     ]
@@ -941,6 +983,7 @@ class OnboardingController:
             f"        'ros_distro': {self._resolved_ros2_distro(state)!r},",
             f"        'profile_id': {self._profile_id(state)!r},",
             f"        'namespace': {namespace!r},",
+            f"        'serial_device_by_id': {facts.get('serial_device_by_id')!r},",
         ]
         if launch_line is not None:
             connection_lines.append(launch_line)
@@ -1114,14 +1157,14 @@ class OnboardingController:
         primary_robot = state.robot_attachments[0]["robot_id"]
         profile = OnboardingController._primary_profile(state)
         facts = state.detected_facts
-        device = str(facts.get("serial_device") or "").strip()
-        if profile is None or not device:
+        device_by_id = str(facts.get("serial_device_by_id") or "").strip()
+        if profile is None or not device_by_id:
             return None
         namespace = OnboardingController._ros2_namespace(state)
-        return profile.stage1_launch_command(
+        return profile.control_launch_command(
             namespace=namespace,
             robot_id=primary_robot,
-            device=device,
+            device_by_id=device_by_id,
         )
 
     @staticmethod

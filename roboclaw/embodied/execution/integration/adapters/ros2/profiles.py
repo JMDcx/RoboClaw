@@ -1,9 +1,13 @@
-"""ROS2 embodiment profiles for stage-1 execution."""
+"""ROS2 embodiment profiles for control bridge execution."""
 
 from __future__ import annotations
 
+import inspect
 import shlex
+import site
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from roboclaw.embodied.execution.integration.transports.ros2.contracts import Ros2ServiceSpec
@@ -11,6 +15,41 @@ from roboclaw.embodied.execution.integration.transports.ros2.contracts import Ro
 
 def _normalize_text(content: str) -> str:
     return " ".join(content.strip().lower().split())
+
+
+def _default_control_pythonpath() -> str:
+    paths: list[str] = []
+
+    def add(path: str | None) -> None:
+        if not path:
+            return
+        expanded = str(Path(path).expanduser())
+        if expanded and expanded not in paths:
+            paths.append(expanded)
+
+    try:
+        import roboclaw
+
+        add(str(Path(inspect.getfile(roboclaw)).resolve().parent.parent))
+    except Exception:
+        pass
+
+    try:
+        import scservo_sdk
+
+        add(str(Path(inspect.getfile(scservo_sdk)).resolve().parent.parent))
+    except Exception:
+        pass
+
+    for entry in site.getsitepackages():
+        add(entry)
+    add(site.getusersitepackages())
+
+    for entry in sys.path:
+        if "site-packages" in entry or "dist-packages" in entry:
+            add(entry)
+
+    return ":".join(paths) or "/app"
 
 
 @dataclass(frozen=True)
@@ -69,8 +108,8 @@ class Ros2EmbodimentProfile:
     optional_topics: tuple[str, ...] = ("state", "health", "events", "joint_states")
     default_reset_mode: str = "home"
     auto_probe_serial: bool = False
-    stage1_bridge_module: str | None = None
-    stage1_default_calibration_id: str | None = None
+    control_bridge_module: str | None = None
+    control_default_calibration_id: str | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def resolve_primitive_alias(self, content: str) -> PrimitiveAliasResolution | None:
@@ -103,19 +142,19 @@ class Ros2EmbodimentProfile:
                 name=item.service_name,
                 service_type=item.service_type,
                 path=f"{namespace}/{item.service_name}",
-                description=f"Stage-1 primitive service for `{item.primitive_name}`.",
+                description=f"Control bridge primitive service for `{item.primitive_name}`.",
             )
             for item in self.primitive_services
         )
 
-    def stage1_launch_command(
+    def control_launch_command(
         self,
         *,
         namespace: str,
         robot_id: str,
-        device: str,
+        device_by_id: str,
     ) -> str | None:
-        if not self.stage1_bridge_module or not device.strip():
+        if not self.control_bridge_module or not device_by_id.strip():
             return None
         ros_setup = (
             'if [ "${ROBOCLAW_ROS2_DISTRO:-none}" != "none" ] '
@@ -125,15 +164,18 @@ class Ros2EmbodimentProfile:
         )
         command = [
             ros_setup,
-            'PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}${ROBOCLAW_ROS2_STAGE1_PYTHONPATH:-/app}"',
-            f"${{ROBOCLAW_ROS2_STAGE1_PYTHON:-python3}} -m {self.stage1_bridge_module}",
+            (
+                'PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}'
+                f'${{ROBOCLAW_ROS2_CONTROL_PYTHONPATH:-{_default_control_pythonpath()}}}"'
+            ),
+            f"${{ROBOCLAW_ROS2_CONTROL_PYTHON:-/usr/bin/python3}} -m {self.control_bridge_module}",
             f"--namespace {shlex.quote(namespace)}",
             f"--profile-id {shlex.quote(self.id)}",
             f"--robot-id {shlex.quote(robot_id)}",
-            f"--device {shlex.quote(device)}",
+            f"--device-by-id {shlex.quote(device_by_id)}",
         ]
-        if self.stage1_default_calibration_id:
-            command.append(f"--calibration-id {shlex.quote(self.stage1_default_calibration_id)}")
+        if self.control_default_calibration_id:
+            command.append(f"--calibration-id {shlex.quote(self.control_default_calibration_id)}")
         return " ".join(command)
 
 
@@ -187,10 +229,10 @@ SO101_ROS2_PROFILE = Ros2EmbodimentProfile(
         ),
     ),
     auto_probe_serial=True,
-    stage1_bridge_module="roboclaw.embodied.execution.integration.bridges.ros2.stage1_server",
-    stage1_default_calibration_id="so101_real",
+    control_bridge_module="roboclaw.embodied.execution.integration.bridges.ros2.control_bridge",
+    control_default_calibration_id="so101_real",
     notes=(
-        "Stage-1 profile for a ROS2-backed SO101 setup.",
+        "Control bridge profile for a ROS2-backed SO101 setup.",
         "Natural-language aliases stay in framework code so workspace assets remain setup-specific only.",
         "Primitive execution can fall back to profile-declared ROS2 services when no generic action surface exists.",
     ),

@@ -95,13 +95,24 @@ def test_onboarding_routes_chinese_real_robot_request(tmp_path: Path) -> None:
     assert controller.should_handle(session, "我想用一个真实的机器人")
 
 
+def test_onboarding_normalizes_tty_input_back_to_by_id(monkeypatch, tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    controller = OnboardingController(tmp_path, ToolRegistry())
+    monkeypatch.setattr(
+        "roboclaw.embodied.onboarding.controller.resolve_serial_by_id_path",
+        lambda device: Path("/dev/serial/by-id/usb-so101") if device == "/dev/ttyACM2" else None,
+    )
+
+    assert controller._normalize_serial_device_by_id("/dev/ttyACM2") == "/dev/serial/by-id/usb-so101"
+
+
 @pytest.mark.asyncio
 async def test_onboarding_generates_ready_setup_for_so101_with_camera(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/serial/by-id/usb-so101\n/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_OK\nros2 0.0.0\nROS_DISTRO=jazzy\n",
         },
     )
@@ -131,12 +142,16 @@ async def test_onboarding_generates_ready_setup_for_so101_with_camera(tmp_path: 
     assert assembly_path.exists()
     assert deployment_path.exists()
     assert adapter_path.exists()
+    assert state["detected_facts"]["serial_device_by_id"] == "/dev/serial/by-id/usb-so101"
     assert "wrist_camera" in assembly_path.read_text(encoding="utf-8")
     deployment_text = deployment_path.read_text(encoding="utf-8")
     assert "/wrist_camera/image_raw" in deployment_text
-    assert "stage1_server" in deployment_text
+    assert "control_bridge" in deployment_text
     assert "--profile-id so101_ros2_standard" in deployment_text
-    assert "ROBOCLAW_ROS2_STAGE1_PYTHON" in deployment_text
+    assert "ROBOCLAW_ROS2_CONTROL_PYTHON" in deployment_text
+    assert "ROBOCLAW_ROS2_CONTROL_PYTHONPATH" in deployment_text
+    assert "--device-by-id" in deployment_text
+    assert "'serial_device_by_id': '/dev/serial/by-id/usb-so101'" in deployment_text
     assert 'source "/opt/ros/${ROBOCLAW_ROS2_DISTRO}/setup.bash"' in deployment_text
 
 
@@ -146,7 +161,7 @@ async def test_onboarding_stops_at_ros2_prerequisite_gate(tmp_path: Path) -> Non
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_MISSING\n",
         },
     )
@@ -169,7 +184,7 @@ async def test_onboarding_stops_at_ros2_prerequisite_gate(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_onboarding_blocks_unknown_stage1_profile_before_asset_generation(tmp_path: Path) -> None:
+async def test_onboarding_blocks_unknown_control_bridge_profile_before_asset_generation(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     tools, _ = _build_tools(tmp_path, {})
     controller = OnboardingController(tmp_path, tools)
@@ -193,9 +208,38 @@ async def test_onboarding_blocks_unknown_stage1_profile_before_asset_generation(
 
     state = session.metadata[SETUP_STATE_KEY]
     assert state["stage"] == "identify_setup_scope"
-    assert state["missing_facts"] == ["stage1_execution_profile"]
-    assert "does not have a framework ROS2 stage-1 execution profile" in response.content
+    assert state["missing_facts"] == ["control_execution_profile"]
+    assert "does not have a framework ROS2 control bridge profile" in response.content
     assert not (tmp_path / "embodied" / "assemblies" / "custom_setup.py").exists()
+
+
+@pytest.mark.asyncio
+async def test_onboarding_refuses_tty_only_device_nodes_without_by_id(tmp_path: Path) -> None:
+    _prepare_workspace(tmp_path)
+    tools, _ = _build_tools(
+        tmp_path,
+        {
+            "for link in /dev/serial/by-id/*": "/dev/ttyACM0\n",
+            "command -v ros2": "ROS2_OK\nros2 0.0.0\nROS_DISTRO=jazzy\n",
+        },
+    )
+    controller = OnboardingController(tmp_path, tools)
+    session = Session(key="cli:direct")
+
+    await controller.handle_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="SO101"),
+        session,
+    )
+    response = await controller.handle_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="connected"),
+        session,
+    )
+
+    state = session.metadata[SETUP_STATE_KEY]
+    assert state["missing_facts"] == ["serial_device_by_id"]
+    assert state["detected_facts"]["serial_device_unstable"] is True
+    assert "stable `/dev/serial/by-id/...`" in response.content
+    assert not (tmp_path / "embodied" / "assemblies" / "so101_setup.py").exists()
 
 
 @pytest.mark.asyncio
@@ -204,7 +248,7 @@ async def test_onboarding_accepts_chinese_connected_confirmation(tmp_path: Path)
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_MISSING\nROS2_SHELL_INIT=0\n",
             "printf \"ID=%s\\n\"": "ID=ubuntu\nVERSION_ID=22.04\nVERSION_CODENAME=jammy\nPRETTY_NAME=Ubuntu 22.04 LTS\nSHELL_NAME=bash\nWSL=0\nSUDO=1\nSUDO_PASSWORDLESS=0\n",
         },
@@ -233,7 +277,7 @@ async def test_onboarding_starts_guided_ros2_install_flow(tmp_path: Path) -> Non
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_MISSING\nROS2_SHELL_INIT=0\n",
             "printf \"ID=%s\\n\"": "ID=ubuntu\nVERSION_ID=24.04\nVERSION_CODENAME=noble\nPRETTY_NAME=Ubuntu 24.04 LTS\nSHELL_NAME=zsh\nCONDA_PREFIX=\nWSL=0\nSUDO=1\nSUDO_PASSWORDLESS=0\n",
         },
@@ -270,7 +314,7 @@ async def test_onboarding_advances_guided_ros2_install_steps(tmp_path: Path) -> 
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_MISSING\nROS2_SHELL_INIT=0\n",
             "printf \"ID=%s\\n\"": "ID=ubuntu\nVERSION_ID=22.04\nVERSION_CODENAME=jammy\nPRETTY_NAME=Ubuntu 22.04 LTS\nSHELL_NAME=bash\nWSL=0\nSUDO=1\nSUDO_PASSWORDLESS=0\n",
         },
@@ -309,7 +353,7 @@ async def test_onboarding_does_not_advance_ros2_install_on_continue_request(tmp_
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_MISSING\nROS2_SHELL_INIT=0\n",
             "printf \"ID=%s\\n\"": "ID=ubuntu\nVERSION_ID=22.04\nVERSION_CODENAME=jammy\nPRETTY_NAME=Ubuntu 22.04 LTS\nSHELL_NAME=bash\nWSL=0\nSUDO=1\nSUDO_PASSWORDLESS=0\n",
         },
@@ -347,7 +391,7 @@ async def test_onboarding_resumes_after_manual_ros2_install_report(tmp_path: Pat
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": [
                 "ROS2_MISSING\nROS2_SHELL_INIT=0\n",
                 "ROS2_OK\nros2 0.0.0\nROS_DISTRO=humble\n",
@@ -387,7 +431,7 @@ async def test_onboarding_keeps_partial_opt_ros_install_in_prerequisite_flow(tmp
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_PRESENT\nINSTALLED_DISTROS=jazzy\nROS2_SHELL_INIT=0\n",
             "printf \"ID=%s\\n\"": "ID=ubuntu\nVERSION_ID=24.04\nVERSION_CODENAME=noble\nPRETTY_NAME=Ubuntu 24.04 LTS\nSHELL_NAME=bash\nCONDA_PREFIX=\nWSL=0\nSUDO=1\nSUDO_PASSWORDLESS=0\n",
         },
@@ -418,7 +462,7 @@ async def test_onboarding_does_not_treat_ros1_install_as_ros2_available(tmp_path
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_MISSING\nROS2_SHELL_INIT=0\n",
             "printf \"ID=%s\\n\"": "ID=ubuntu\nVERSION_ID=24.04\nVERSION_CODENAME=noble\nPRETTY_NAME=Ubuntu 24.04 LTS\nSHELL_NAME=bash\nWSL=0\nSUDO=1\nSUDO_PASSWORDLESS=0\n",
         },
@@ -447,7 +491,7 @@ async def test_onboarding_accepts_installed_ros2_when_shell_init_is_configured(t
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/ttyACM0\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_PRESENT\nINSTALLED_DISTROS=humble\nROS2_SHELL_INIT=1\n",
         },
     )
@@ -477,7 +521,7 @@ async def test_onboarding_refinement_updates_existing_setup(tmp_path: Path) -> N
     tools, _ = _build_tools(
         tmp_path,
         {
-            "ls -1 /dev/serial/by-id": "/dev/serial/by-id/usb-so101\n",
+            "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
             "command -v ros2": "ROS2_OK\nROS_DISTRO=jazzy\n",
         },
     )
@@ -520,7 +564,7 @@ async def test_agent_loop_routes_first_run_setup_without_calling_provider(tmp_pa
     loop.tools.register(
         FakeExecTool(
             {
-                "ls -1 /dev/serial/by-id": "/dev/serial/by-id/usb-so101\n",
+                "for link in /dev/serial/by-id/*": "/dev/serial/by-id/usb-so101 -> /dev/ttyACM0\n/dev/ttyACM0\n",
                 "command -v ros2": "ROS2_OK\nROS_DISTRO=jazzy\n",
             }
         )

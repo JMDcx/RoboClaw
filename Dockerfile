@@ -1,11 +1,12 @@
+# syntax=docker/dockerfile:1.7
 ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ROBOCLAW_DOCKER_PROFILE=ubuntu2404
+ARG ROBOCLAW_DOCKER_PROFILE=ubuntu2404-ros2
 ARG ROBOCLAW_INSTALL_ROS2=0
 ARG ROBOCLAW_ROS2_DISTRO=none
-ARG ROBOCLAW_ROS2_STAGE1_PYTHON=/usr/local/bin/python3
+ARG ROBOCLAW_ROS2_CONTROL_PYTHON=/usr/local/bin/python3
 ARG ROBOCLAW_PYTHON_VERSION=3.11
 ARG HTTP_PROXY=
 ARG HTTPS_PROXY=
@@ -14,8 +15,8 @@ ARG http_proxy=
 ARG https_proxy=
 ARG all_proxy=
 ENV ROBOCLAW_ROS2_DISTRO=${ROBOCLAW_ROS2_DISTRO}
-ENV ROBOCLAW_ROS2_STAGE1_PYTHON=${ROBOCLAW_ROS2_STAGE1_PYTHON}
-ENV ROBOCLAW_ROS2_STAGE1_PYTHONPATH=/usr/local/lib/python${ROBOCLAW_PYTHON_VERSION}/dist-packages:/app
+ENV ROBOCLAW_ROS2_CONTROL_PYTHON=${ROBOCLAW_ROS2_CONTROL_PYTHON}
+ENV ROBOCLAW_ROS2_CONTROL_PYTHONPATH=/usr/local/lib/python${ROBOCLAW_PYTHON_VERSION}/dist-packages:/app
 ENV HTTP_PROXY=${HTTP_PROXY}
 ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV ALL_PROXY=${ALL_PROXY}
@@ -75,14 +76,21 @@ WORKDIR /app
 
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p roboclaw bridge && touch roboclaw/__init__.py && \
+RUN mkdir -p roboclaw bridge scservo_sdk && touch roboclaw/__init__.py scservo_sdk/__init__.py && \
     python -m pip install --no-cache-dir . && \
-    rm -rf roboclaw bridge
+    rm -rf roboclaw bridge scservo_sdk
 
 # Copy the full source and install
 COPY roboclaw/ roboclaw/
+COPY scservo_sdk/ scservo_sdk/
 COPY bridge/ bridge/
 RUN python -m pip install --no-cache-dir .
+RUN python - <<'PY'
+import importlib.util
+spec = importlib.util.find_spec("scservo_sdk")
+if spec is None:
+    raise SystemExit("scservo_sdk was not installed into the image")
+PY
 
 RUN mv /usr/local/bin/roboclaw /usr/local/bin/roboclaw-real
 COPY scripts/docker/roboclaw-wrapper.sh /usr/local/bin/roboclaw

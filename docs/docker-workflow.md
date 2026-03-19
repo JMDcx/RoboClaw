@@ -1,77 +1,62 @@
-# Docker Workflow
+# Docker Dev Workflow
 
-RoboClaw supports two Docker workflows on a remote Linux host:
+Use this workflow when you want fast iteration on the latest host source without rebuilding on every Python edit.
 
-- Long-lived development containers that stay alive until you stop them.
-- One-shot task containers that run a single RoboClaw command and exit.
-- Matrix runs that build multiple OS profiles and run the same task across each profile from one entrypoint.
+The dev workflow is separate from the immutable validation workflow:
 
-All container state lives under `~/.roboclaw-docker/instances/<instance>--<profile>/`.
-Each profile instance has its own `config.json`, `workspace/`, and runtime data derived from the config directory.
-By default, bootstrap copies `~/.roboclaw/config.json` into the instance once, then the container state diverges from the host.
+- Dev containers are bind-mounted to the host RoboClaw repo.
+- Dev containers run the latest host source through `PYTHONPATH` precedence.
+- Validation images stay clean, commit-tagged, and rebuild only when dependencies change.
 
-## Scripts
+## Dev Containers
 
-Build an image for one instance:
+Start a long-lived dev container for one instance and profile:
 
 ```bash
-./scripts/docker/build-image.sh devbox
+./scripts/docker/start-dev.sh devbox --profile ubuntu2404-ros2
+./scripts/docker/exec-dev.sh devbox --profile ubuntu2404-ros2
 ```
 
-The build only runs when the Git worktree is clean. Image tags include the
-instance name and the current short commit hash, for example
-`roboclaw:devbox-ubuntu2404-ros2-10c41db`.
+The dev container mounts the host repo at `/roboclaw-source` and uses it first on `PYTHONPATH`,
+so ordinary source edits are visible immediately without rebuilding the image.
 
-Build the same instance for multiple OS profiles from one command:
+The dev container still uses the same isolated instance state under:
 
-```bash
-./scripts/docker/matrix.sh build devbox --profiles ubuntu2204-ros2,ubuntu2404-ros2
+```text
+~/.roboclaw-docker/instances/<instance>--<profile>/
 ```
 
-Create or refresh the isolated instance state:
+That instance directory stores:
 
-```bash
-./scripts/docker/bootstrap-instance.sh devbox
-```
+- `config.json`
+- `workspace/`
+- `calibration/`
+- runtime user state under `home/`
 
-Start a long-lived container and keep it around:
+The bootstrap step seeds instance-local calibration from the host's canonical
+`~/.roboclaw/calibration/` tree when it exists. If that tree is empty but a
+legacy lerobot calibration cache exists, the bootstrap step imports it once into
+the instance-local canonical layout.
 
-```bash
-./scripts/docker/start-dev.sh devbox
-./scripts/docker/exec-dev.sh devbox
-```
+## When To Rebuild
 
-Run a one-shot RoboClaw task:
+Use `build-image.sh` only when the runtime environment changes:
 
-```bash
-./scripts/docker/run-task.sh devbox status
-./scripts/docker/run-task.sh devbox onboard
-./scripts/docker/run-task.sh devbox agent -m hello --no-markdown
-```
+- Dockerfile changes
+- ROS/system dependency changes
+- explicit Python dependency changes
+- release or acceptance validation
 
-Run the same task across the matrix from one command:
+For normal Python source edits, keep the dev container running and rerun the command you are
+testing.
 
-```bash
-./scripts/docker/matrix.sh run-task devbox --profiles ubuntu2204-ros2,ubuntu2404-ros2 -- status
-./scripts/docker/matrix.sh run-task devbox --profiles ubuntu2204-ros2,ubuntu2404-ros2 -- agent -m "Hello!" --no-markdown
-```
+## Dependencies
 
-Start long-lived dev containers for all matrix profiles:
+`scservo_sdk` ships as part of the RoboClaw source tree, so the Docker image no
+longer depends on a host-side site-packages drop.
 
-```bash
-./scripts/docker/matrix.sh start-dev devbox --profiles ubuntu2204-ros2,ubuntu2404-ros2
-```
+## Related Validation Workflow
 
-## Profiles
+The immutable matrix acceptance workflow lives in:
 
-- `ubuntu2204-ros2`: `ubuntu:22.04` + Python 3.11 + ROS2 Humble
-- `ubuntu2404-ros2`: `ubuntu:24.04` + Python 3.11 + ROS2 Jazzy
-
-## Networking and proxies
-
-The scripts discover a local proxy port on the remote host and export proxy variables automatically when possible.
-
-- Docker builds always use `--network=host`.
-- Runtime containers always use host networking.
-- This is required when the remote host exposes its VPN or proxy on `127.0.0.1`.
-- When the remote host has `~/.codex/auth.json`, the dev and task workflows mount it read-only into the container so `roboclaw agent` can reuse host authentication without copying credentials into the isolated instance state.
+- [Docker Validation Workflow](./docker-validation.md)

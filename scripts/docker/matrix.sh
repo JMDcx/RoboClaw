@@ -30,7 +30,6 @@ run_for_profiles() {
         "${SCRIPT_DIR}/build-image.sh" --profile "${profile}" "${instance}"
         ;;
       start-dev)
-        "${SCRIPT_DIR}/build-image.sh" --profile "${profile}" "${instance}"
         "${SCRIPT_DIR}/start-dev.sh" --profile "${profile}" "${instance}"
         ;;
       *)

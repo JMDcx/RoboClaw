@@ -1,4 +1,4 @@
-"""Stage-1 ROS2 bridge server for framework-owned embodied execution."""
+"""Control bridge ROS2 server for framework-owned embodied execution."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from roboclaw.embodied.execution.integration.adapters.ros2.profiles import (
 from roboclaw.embodied.execution.integration.bridges.ros2.so101_feetech import So101FeetechRuntime
 
 
-class Stage1Ros2BridgeServer:
+class Ros2ControlBridgeServer:
     """Expose a minimal ROS2 lifecycle and primitive surface."""
 
     def __init__(
@@ -23,7 +23,7 @@ class Stage1Ros2BridgeServer:
         namespace: str,
         profile_id: str,
         robot_id: str,
-        device: str,
+        device_by_id: str,
         calibration_path: str | None,
         calibration_id: str,
         state_rate_hz: float,
@@ -42,7 +42,7 @@ class Stage1Ros2BridgeServer:
         self._runtime = self._build_runtime(
             profile_id=profile_id,
             robot_id=robot_id,
-            device=device,
+            device_by_id=device_by_id,
             calibration_path=calibration_path,
             calibration_id=calibration_id,
         )
@@ -53,7 +53,7 @@ class Stage1Ros2BridgeServer:
         class BridgeNode(Node):
             pass
 
-        self.node = BridgeNode("roboclaw_stage1_bridge")
+        self.node = BridgeNode("roboclaw_control_bridge")
         self._state_publisher = self.node.create_publisher(String, f"{self._namespace}/state", 10)
         self._health_publisher = self.node.create_publisher(String, f"{self._namespace}/health", 10)
         self._events_publisher = self.node.create_publisher(String, f"{self._namespace}/events", 10)
@@ -74,26 +74,25 @@ class Stage1Ros2BridgeServer:
         *,
         profile_id: str,
         robot_id: str,
-        device: str,
+        device_by_id: str,
         calibration_path: str | None,
         calibration_id: str,
     ) -> Any:
         profile = get_ros2_profile(profile_id)
         robot_profile = get_ros2_profile(robot_id)
         if profile is None:
-            raise ValueError(
-                f"Unknown stage-1 ROS2 profile '{profile_id}'."
-            )
+            raise ValueError(f"Unknown control bridge ROS2 profile '{profile_id}'.")
         if robot_profile is None:
-            raise ValueError(f"Unknown stage-1 ROS2 robot '{robot_id}'.")
+            raise ValueError(f"Unknown control bridge ROS2 robot '{robot_id}'.")
         if profile.id != robot_profile.id:
             raise ValueError(
-                f"Stage-1 ROS2 bridge profile/robot mismatch: profile='{profile.id}' robot='{robot_id}'."
+                f"Control bridge ROS2 profile/robot mismatch: profile='{profile.id}' robot='{robot_id}'."
             )
         if profile.id != SO101_ROS2_PROFILE.id:
-            raise ValueError(f"Stage-1 ROS2 bridge does not support profile '{profile.id}' yet.")
+            raise ValueError(f"Control bridge ROS2 server does not support profile '{profile.id}' yet.")
         return So101FeetechRuntime(
-            device=device,
+            device_by_id=device_by_id,
+            robot_name=robot_id,
             calibration_path=calibration_path,
             calibration_id=calibration_id,
         )
@@ -126,7 +125,8 @@ class Stage1Ros2BridgeServer:
             "profile_id": self._profile_id,
             "robot_id": self._robot_id,
             "connected": snapshot.get("connected"),
-            "device": snapshot.get("device"),
+            "device_by_id": snapshot.get("device_by_id"),
+            "resolved_device": snapshot.get("resolved_device"),
             "gripper_present_raw": snapshot.get("gripper_present_raw"),
             "gripper_percent": snapshot.get("gripper_percent"),
             "last_primitive": self._last_primitive,
@@ -252,27 +252,24 @@ class Stage1Ros2BridgeServer:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run RoboClaw stage-1 ROS2 bridge.")
+    parser = argparse.ArgumentParser(description="Run RoboClaw ROS2 control bridge.")
     parser.add_argument("--namespace", required=True)
     parser.add_argument("--profile-id", required=True)
     parser.add_argument("--robot-id", required=True)
-    parser.add_argument("--device", required=True)
+    parser.add_argument("--device-by-id", required=True)
     parser.add_argument("--calibration-path")
     parser.add_argument("--calibration-id", default="so101_real")
-    parser.add_argument("--state-rate-hz", type=float, default=4.0)
+    parser.add_argument("--state-rate-hz", type=float, default=5.0)
     return parser.parse_args()
 
 
-def main() -> int:
+def main() -> None:
     args = _parse_args()
-    import rclpy
-
-    rclpy.init()
-    server = Stage1Ros2BridgeServer(
+    server = Ros2ControlBridgeServer(
         namespace=args.namespace,
         profile_id=args.profile_id,
         robot_id=args.robot_id,
-        device=args.device,
+        device_by_id=args.device_by_id,
         calibration_path=args.calibration_path,
         calibration_id=args.calibration_id,
         state_rate_hz=args.state_rate_hz,
@@ -281,8 +278,7 @@ def main() -> int:
         server.spin()
     finally:
         server.shutdown()
-    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

@@ -17,7 +17,16 @@ x-common-config: &common-config
 
 services:
   roboclaw-dev:
-    <<: *common-config
+    image: ${ROBOCLAW_IMAGE:?set ROBOCLAW_IMAGE}
+    network_mode: host
+    user: ${ROBOCLAW_UID:?set ROBOCLAW_UID}:${ROBOCLAW_GID:?set ROBOCLAW_GID}
+    environment:
+      <<: *common-environment
+      PYTHONPATH: /roboclaw-source:/usr/local/lib/python3.11/dist-packages:/app
+      ROBOCLAW_ROS2_CONTROL_PYTHONPATH: /roboclaw-source:/usr/local/lib/python3.11/dist-packages:/app
+    volumes:
+      - ${ROBOCLAW_INSTANCE_DIR:?set ROBOCLAW_INSTANCE_DIR}:/roboclaw-instance
+      - ${ROBOCLAW_SOURCE_DIR:?set ROBOCLAW_SOURCE_DIR}:/roboclaw-source
     entrypoint: ["sleep"]
     command: ["infinity"]
     restart: unless-stopped

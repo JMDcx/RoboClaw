@@ -14,7 +14,13 @@ fi
 
 INSTANCE="${1:-}"
 require_instance "${INSTANCE}"
-ensure_image_exists "${INSTANCE}" "${PROFILE}"
+TARGET_IMAGE="$(dev_image_ref "${INSTANCE}" "${PROFILE}")"
+if ! docker image inspect "${TARGET_IMAGE}" >/dev/null 2>&1; then
+  if ! docker image inspect "$(image_ref "${INSTANCE}" "${PROFILE}")" >/dev/null 2>&1; then
+    "${SCRIPT_DIR}/build-image.sh" --profile "${PROFILE}" "${INSTANCE}"
+  fi
+  docker tag "$(image_ref "${INSTANCE}" "${PROFILE}")" "${TARGET_IMAGE}"
+fi
 ensure_instance_dir "${INSTANCE}" "${PROFILE}"
 
 INSTANCE_DIR="$(instance_dir "${INSTANCE}" "${PROFILE}")"
@@ -30,8 +36,7 @@ if [ ! -f "${INSTANCE_CONFIG}" ]; then
 fi
 
 configure_proxy_env
-
-mkdir -p "${INSTANCE_DIR}/home/.cache/huggingface/lerobot"
+prepare_instance_calibration "${INSTANCE}" "${PROFILE}"
 
 docker run --rm \
   --network host \
@@ -48,5 +53,5 @@ docker run --rm \
   -e all_proxy="${all_proxy:-}" \
   -v "${INSTANCE_DIR}:/roboclaw-instance" \
   --entrypoint python \
-  "$(image_ref "${INSTANCE}" "${PROFILE}")" \
+  "${TARGET_IMAGE}" \
   -c 'from roboclaw.config.loader import get_config_path, load_config, save_config; from roboclaw.config.paths import get_workspace_path; from roboclaw.config.schema import Config; from roboclaw.utils.helpers import sync_workspace_templates; path = get_config_path(); cfg = load_config(path) if path.exists() else Config(); save_config(cfg, path); workspace = get_workspace_path(); workspace.mkdir(parents=True, exist_ok=True); sync_workspace_templates(workspace)'

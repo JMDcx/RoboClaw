@@ -57,10 +57,11 @@ Current embodiment coverage is tracked like this:
 
 ## 📦 Installation
 
-RoboClaw supports two user installation paths:
+RoboClaw supports three main ways to work with the codebase:
 
-- [Non-Docker Installation](./INSTALLATION.md): install RoboClaw directly on the host Python environment
-- [Docker Installation](./DOCKERINSTALLATION.md): use the remote Linux Docker workflow with isolated instance state
+- [Native Installation](./INSTALLATION.md): install RoboClaw directly on the host Python environment
+- [Docker Dev Workflow](./docs/docker-workflow.md): bind-mounted developer containers that run the latest host source without rebuilds
+- [Docker Validation Workflow](./docs/docker-validation.md): immutable ROS2 matrix images for clean acceptance runs
 
 If you like using AI, you can simply ask your coding assistant:
 
@@ -68,7 +69,7 @@ If you like using AI, you can simply ask your coding assistant:
 Help me install RoboClaw from https://github.com/MINT-SJTU/RoboClaw
 ```
 
-If you prefer step-by-step setup, start from either [Non-Docker Installation](./INSTALLATION.md) or [Docker Installation](./DOCKERINSTALLATION.md).
+If you prefer step-by-step setup, start from [Native Installation](./INSTALLATION.md). For Docker, choose the dev or validation workflow docs above depending on whether you want fast iteration or clean acceptance.
 
 ## 📢 Community Co-Creation
 

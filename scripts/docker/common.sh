@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ROBOCLAW_DOCKER_HOME="${ROBOCLAW_DOCKER_HOME:-${HOME}/.roboclaw-docker}"
 DEFAULT_DOCKER_PROFILE="${ROBOCLAW_DOCKER_PROFILE:-ubuntu2404-ros2}"
 DEFAULT_MATRIX_PROFILES="${ROBOCLAW_DOCKER_MATRIX_PROFILES:-ubuntu2204-ros2,ubuntu2404-ros2}"
+ROBOCLAW_PYTHON_VERSION="${ROBOCLAW_PYTHON_VERSION:-3.11}"
 
 die() {
   echo "error: $*" >&2
@@ -64,7 +65,7 @@ docker_profile_installs_ros2() {
   printf '%s\n' "1"
 }
 
-docker_profile_stage1_python() {
+docker_profile_control_bridge_python() {
   docker_profile "${1:-}" >/dev/null
   printf '%s\n' "/usr/bin/python3"
 }
@@ -138,6 +139,13 @@ image_ref() {
   local profile
   profile="$(docker_profile "${2:-}")"
   printf 'roboclaw:%s-%s-%s\n' "${instance}" "${profile}" "$(current_commit_short)"
+}
+
+dev_image_ref() {
+  local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf 'roboclaw:dev-%s-%s\n' "${instance}" "${profile}"
 }
 
 current_commit_short() {
@@ -225,8 +233,10 @@ ensure_instance_dir() {
   profile="$(docker_profile "${2:-}")"
   mkdir -p \
     "$(instance_dir "${instance}" "${profile}")/workspace" \
+    "$(instance_dir "${instance}" "${profile}")/calibration" \
     "$(instance_dir "${instance}" "${profile}")/home" \
-    "$(instance_dir "${instance}" "${profile}")/home/.codex"
+    "$(instance_dir "${instance}" "${profile}")/home/.codex" \
+    "$(instance_dir "${instance}" "${profile}")/home/.local/share/oauth-cli-kit/auth"
 }
 
 host_codex_auth_path() {
@@ -243,21 +253,79 @@ host_oauth_cli_kit_auth_dir() {
   fi
 }
 
-host_lerobot_calibration_dir() {
-  local path="${HOME}/.cache/huggingface/lerobot/calibration"
+instance_calibration_dir() {
+  local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  printf '%s/calibration\n' "$(instance_dir "${instance}" "${profile}")"
+}
+
+host_native_calibration_dir() {
+  local path="${HOME}/.roboclaw/calibration"
   if [ -d "${path}" ]; then
     printf '%s\n' "${path}"
   fi
 }
 
-host_scservo_sdk_dir() {
-  python - <<'PY' 2>/dev/null
-import importlib.util
-import pathlib
-spec = importlib.util.find_spec("scservo_sdk")
-if spec and spec.origin:
-    print(pathlib.Path(spec.origin).resolve().parent)
+host_legacy_calibration_dir() {
+  local path="${HOME}/.cache/huggingface/lerobot/calibration/robots"
+  if [ -d "${path}" ]; then
+    printf '%s\n' "${path}"
+  fi
+}
+
+prepare_instance_calibration() {
+  local instance="${1}"
+  local profile
+  profile="$(docker_profile "${2:-}")"
+  local native_seed_dir legacy_seed_dir instance_calibration_dir
+  native_seed_dir="$(host_native_calibration_dir || true)"
+  legacy_seed_dir="$(host_legacy_calibration_dir || true)"
+  instance_calibration_dir="$(instance_calibration_dir "${instance}" "${profile}")"
+
+  mkdir -p "${instance_calibration_dir}"
+
+  if [ -n "${native_seed_dir}" ] && [ -z "$(find "${instance_calibration_dir}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+    python - "${native_seed_dir}" "${instance_calibration_dir}" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+seed_dir = Path(sys.argv[1])
+target_dir = Path(sys.argv[2])
+if seed_dir.is_dir():
+    for child in seed_dir.iterdir():
+        destination = target_dir / child.name
+        if child.is_dir():
+            shutil.copytree(child, destination, dirs_exist_ok=True)
+        else:
+            shutil.copy2(child, destination)
 PY
+  fi
+
+  if [ -n "${legacy_seed_dir}" ] && [ -z "$(find "${instance_calibration_dir}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+    python - "${legacy_seed_dir}" "${instance_calibration_dir}" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+legacy_root = Path(sys.argv[1])
+target_dir = Path(sys.argv[2])
+robot_aliases = {
+    "so_follower": "so101",
+    "so100_follower": "so101",
+}
+for source_name, target_name in robot_aliases.items():
+    source_dir = legacy_root / source_name
+    if not source_dir.is_dir():
+        continue
+    destination = target_dir / target_name
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in source_dir.iterdir():
+        if child.is_file():
+            shutil.copy2(child, destination / child.name)
+PY
+  fi
 }
 
 instance_oauth_cli_kit_auth_dir() {

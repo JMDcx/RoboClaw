@@ -1,15 +1,15 @@
-"""Minimal SO101 Feetech runtime extracted into RoboClaw."""
+"""Minimal SO101 Feetech runtime used by the ROS2 control bridge."""
 
 from __future__ import annotations
 
 import json
 import importlib.util
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
+from roboclaw.config.paths import ensure_robot_calibration_file, resolve_active_serial_device_path
 from roboclaw.embodied.execution.integration.bridges.ros2.scservo import ServoCalibration
 
 PROTOCOL_VERSION = 0
@@ -49,23 +49,26 @@ def _patch_packet_timeout(port_handler: Any, scs: Any) -> None:
 
 
 class So101FeetechRuntime:
-    """Direct SO101 runtime used by the stage-1 ROS2 bridge."""
+    """Direct SO101 runtime used by the control bridge."""
 
     def __init__(
         self,
         *,
-        device: str,
+        device_by_id: str,
+        robot_name: str = "so101",
         calibration_path: str | None = None,
         calibration_id: str = "so101_real",
         baudrate: int = DEFAULT_BAUDRATE,
     ) -> None:
-        self.device = device
-        self.calibration_path = self._resolve_calibration_path(calibration_path, calibration_id)
+        self.device_by_id = device_by_id
+        self.robot_name = robot_name
+        self.calibration_path = self._resolve_calibration_path(robot_name, calibration_path, calibration_id)
         self.baudrate = baudrate
         self._calibration = self._load_calibration(self.calibration_path)
         self._port_handler: Any | None = None
         self._packet_handler: Any | None = None
         self._scs: Any | None = None
+        self._resolved_device_path: Path | None = None
 
     @property
     def connected(self) -> bool:
@@ -78,13 +81,14 @@ class So101FeetechRuntime:
         self._ensure_scservo_sdk()
         import scservo_sdk as scs
 
-        port_handler = scs.PortHandler(self.device)
+        self._resolved_device_path = resolve_active_serial_device_path(self.device_by_id)
+        port_handler = scs.PortHandler(str(self._resolved_device_path))
         _patch_packet_timeout(port_handler, scs)
         if not port_handler.openPort():
-            raise RuntimeError(f"Failed to open servo device '{self.device}'.")
+            raise RuntimeError(f"Failed to open servo device '{self._resolved_device_path}'.")
         if not port_handler.setBaudRate(self.baudrate):
             port_handler.closePort()
-            raise RuntimeError(f"Failed to set baudrate {self.baudrate} on '{self.device}'.")
+            raise RuntimeError(f"Failed to set baudrate {self.baudrate} on '{self._resolved_device_path}'.")
 
         self._port_handler = port_handler
         self._packet_handler = scs.PacketHandler(PROTOCOL_VERSION)
@@ -102,6 +106,7 @@ class So101FeetechRuntime:
             self._port_handler = None
             self._packet_handler = None
             self._scs = None
+            self._resolved_device_path = None
 
     def open_gripper(self) -> dict[str, Any]:
         target = self._normalized_to_raw("gripper", 100.0)
@@ -138,7 +143,8 @@ class So101FeetechRuntime:
 
     def snapshot(self) -> dict[str, Any]:
         return {
-            "device": self.device,
+            "device_by_id": self.device_by_id,
+            "resolved_device": str(self._resolved_device_path) if self._resolved_device_path is not None else None,
             "calibration_path": str(self.calibration_path),
             "connected": self.connected,
             "gripper_servo_id": self._gripper_id,
@@ -237,23 +243,19 @@ class So101FeetechRuntime:
             raise RuntimeError(f"{operation} returned servo error: {self._packet_handler.getRxPacketError(error)}")
 
     @staticmethod
-    def _resolve_calibration_path(path: str | None, calibration_id: str) -> Path:
+    def _resolve_calibration_path(robot_name: str, path: str | None, calibration_id: str) -> Path:
         if path:
             resolved = Path(path).expanduser().resolve()
             if not resolved.exists():
                 raise FileNotFoundError(f"Calibration file '{resolved}' does not exist.")
             return resolved
 
-        candidates = (
-            Path.home() / ".cache" / "huggingface" / "lerobot" / "calibration" / "robots" / "so_follower" / f"{calibration_id}.json",
-            Path.home() / ".cache" / "huggingface" / "lerobot" / "calibration" / "robots" / "so100_follower" / f"{calibration_id}.json",
-        )
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate.resolve()
+        canonical_path = ensure_robot_calibration_file(robot_name, calibration_id)
+        if canonical_path.exists():
+            return canonical_path.resolve()
         raise FileNotFoundError(
             "Could not auto-discover an SO101 calibration file. "
-            f"Checked: {', '.join(str(item) for item in candidates)}"
+            f"Expected '{canonical_path}' or a legacy calibration import that could be migrated into it."
         )
 
     @staticmethod
@@ -283,23 +285,17 @@ class So101FeetechRuntime:
     def _ensure_scservo_sdk() -> None:
         if importlib.util.find_spec("scservo_sdk") is not None:
             return
-        conda_prefix = os.environ.get("CONDA_PREFIX", "").strip()
-        if conda_prefix:
-            for candidate in sorted(Path(conda_prefix).glob("lib/python*/site-packages")):
-                candidate_str = str(candidate)
-                if candidate_str not in sys.path:
-                    sys.path.append(candidate_str)
-        if importlib.util.find_spec("scservo_sdk") is None:
-            raise ModuleNotFoundError(
-                "scservo_sdk is unavailable. Activate the RoboClaw conda env before launching the ROS2 bridge."
-            )
+        raise ModuleNotFoundError(
+            "scservo_sdk is unavailable. Install the RoboClaw SO101 Python dependency bundle before launching the ROS2 control bridge."
+        )
 
 
 def build_so101_runtime_from_env() -> So101FeetechRuntime:
     """Construct a runtime from env vars for ad-hoc diagnostics."""
 
     return So101FeetechRuntime(
-        device=os.environ.get("ROBOCLAW_SO101_DEVICE", "/dev/ttyACM0"),
+        device_by_id=os.environ.get("ROBOCLAW_SO101_DEVICE_BY_ID", "/dev/serial/by-id/unknown"),
+        robot_name=os.environ.get("ROBOCLAW_SO101_ROBOT_NAME", "so101"),
         calibration_path=os.environ.get("ROBOCLAW_SO101_CALIBRATION"),
         calibration_id=os.environ.get("ROBOCLAW_SO101_CALIBRATION_ID", "so101_real"),
     )

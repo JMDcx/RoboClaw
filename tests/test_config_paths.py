@@ -3,6 +3,8 @@ from pathlib import Path
 from roboclaw.config.loader import CONFIG_PATH_ENV, get_config_path
 from roboclaw.config.paths import (
     WORKSPACE_PATH_ENV,
+    get_calibration_dir,
+    get_calibration_root,
     get_bridge_install_dir,
     get_cli_history_path,
     get_cron_dir,
@@ -32,6 +34,14 @@ def test_media_dir_supports_channel_namespace(monkeypatch, tmp_path: Path) -> No
 
     assert get_media_dir() == config_file.parent / "media"
     assert get_media_dir("telegram") == config_file.parent / "media" / "telegram"
+
+
+def test_calibration_dirs_follow_active_config_root(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance-c" / "config.json"
+    monkeypatch.setattr("roboclaw.config.paths.get_config_path", lambda: config_file)
+
+    assert get_calibration_root() == config_file.parent / "calibration"
+    assert get_calibration_dir("so101") == config_file.parent / "calibration" / "so101"
 
 
 def test_shared_and_legacy_paths_remain_global() -> None:
