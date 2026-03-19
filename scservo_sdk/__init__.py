@@ -1,7 +1,6 @@
-"""Vendored SCServo Python support used by RoboClaw SO101 control."""
+#!/usr/bin/env python
 
-from .packet_handler import PacketHandler
-from .port_handler import PortHandler
-from .scservo_def import *  # noqa: F403
-
-__all__ = ["PacketHandler", "PortHandler"]
+from .port_handler import *
+from .packet_handler import *
+from .group_sync_read import *
+from .group_sync_write import *

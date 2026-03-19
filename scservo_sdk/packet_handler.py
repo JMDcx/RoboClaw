@@ -1,9 +1,10 @@
-"""Factory wrapper matching the upstream SCServo API."""
+#!/usr/bin/env python
 
-from .protocol_packet_handler import protocol_packet_handler
-from .scservo_def import SCS_SETEND
+from .scservo_def import *
+from .protocol_packet_handler import *
 
 
-def PacketHandler(protocol_end):  # noqa: N802
+def PacketHandler(protocol_end):
+    # FIXME: float or int-to-float comparison can generate weird behaviour
     SCS_SETEND(protocol_end)
     return protocol_packet_handler()
