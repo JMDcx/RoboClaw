@@ -11,6 +11,7 @@
 - **L2** — 想做复杂任务？对话组合出抓取、搬运等技能。
 - **L3** — 做科研？对话驱动数据采集、训练、部署、监督，完整闭环。
 - 接入新机器人不写代码，对话描述硬件，Agent 生成 adapter。
+- 借鉴 LeRobot 的 dataset 格式和训练范式，自己实现，不引入外部依赖。
 - 内置 ACT、Diffusion Policy 等主流算法，对话选择和调参。
 - 仿真到真机无缝切换。每个本体自带安全约束，框架强制执行。
 
@@ -23,8 +24,8 @@
 ### 当前批次
 
 - [x] 1. 摄像头组合：本体 + 摄像头在 assembly 中绑定，实时取图，数据可录入 episode ✅
-- [ ] 2. fork LeRobot dataset 模块到 `roboclaw/vendor/lerobot/`，将 data_collection 从 JSONL 切到 LeRobot dataset 格式（依赖 #1，episode 需带图像）
-- [ ] 3. fork LeRobot ACT policy，作为第一个内置训练 recipe（依赖 #2）
+- [x] 2. 数据采集格式：借鉴 LeRobot dataset 范式，实现带图像的 episode 录制格式（依赖 #1） ✅
+- [ ] 3. ACT 训练 recipe：借鉴 LeRobot ACT 实现，作为第一个内置可训练 policy（依赖 #2）
 - [x] 4. Layer 2 能力查询接口：从 primitive 的 CapabilityFamily 自动聚合本体能力，Agent 可查询 ✅
 - [ ] 5. 接入 PiperX 作为第二个 builtin 本体，参考 Evo-RL（GitHub），验证框架泛化（依赖 #4）
 - [ ] 6. L1 验收测试：Claude Code 扮演小白用户，自由对话连接 SO101 并让夹爪动起来（独立，可并行）
