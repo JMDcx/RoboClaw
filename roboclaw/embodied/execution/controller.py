@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -11,6 +12,7 @@ from roboclaw.embodied.builtins import get_builtin_embodiment_for_robot, list_ro
 from roboclaw.bus.events import InboundMessage, OutboundMessage
 from roboclaw.embodied.catalog import build_catalog
 from roboclaw.embodied.localization import choose_language, localize_text
+from roboclaw.embodied.execution.orchestration.data_collection import collect_episodes
 from roboclaw.embodied.execution.orchestration.skills import execute_skill
 from roboclaw.embodied.execution.orchestration.procedures.model import ProcedureKind
 from roboclaw.embodied.execution.orchestration.runtime.executor import (
@@ -330,6 +332,7 @@ class EmbodiedExecutionController:
         primitive_args: dict[str, Any] | None = None,
         skill_name: str | None = None,
         skill_args: dict[str, Any] | None = None,
+        num_episodes: int | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> EmbodiedToolResult:
         """Execute one strong-constrained embodied action for the agent."""
@@ -441,6 +444,72 @@ class EmbodiedExecutionController:
                 skill,
                 skill_args=skill_args,
                 on_progress=on_progress,
+            )
+        elif action == "collect_data":
+            if not skill_name or not skill_name.strip():
+                return EmbodiedToolResult(
+                    ok=False,
+                    action=action,
+                    setup_id=setup.setup_id,
+                    runtime_status=context.runtime.status.value,
+                    message=localize_text(
+                        context.preferred_language,
+                        en="`skill_name` is required when action is `collect_data`.",
+                        zh="当 action 是 `collect_data` 时，必须提供 `skill_name`。",
+                    ),
+                    details={},
+                )
+            requested_episodes = 10 if num_episodes is None else num_episodes
+            if requested_episodes < 1:
+                return EmbodiedToolResult(
+                    ok=False,
+                    action=action,
+                    setup_id=setup.setup_id,
+                    runtime_status=context.runtime.status.value,
+                    message=localize_text(
+                        context.preferred_language,
+                        en="`num_episodes` must be at least 1 when action is `collect_data`.",
+                        zh="当 action 是 `collect_data` 时，`num_episodes` 必须至少为 1。",
+                    ),
+                    details={},
+                )
+            builtin = get_builtin_embodiment_for_robot(context.robot.id)
+            skill = next((item for item in getattr(builtin, "skills", ()) if item.name == skill_name), None)
+            if skill is None:
+                return EmbodiedToolResult(
+                    ok=False,
+                    action=action,
+                    setup_id=setup.setup_id,
+                    runtime_status=context.runtime.status.value,
+                    message=localize_text(
+                        context.preferred_language,
+                        en=f"Skill `{skill_name}` is not available for robot `{context.robot.id}`.",
+                        zh=f"机器人 `{context.robot.id}` 不支持 skill `{skill_name}`。",
+                    ),
+                    details={},
+                )
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            collection = await collect_episodes(
+                self.executor,
+                context,
+                skill,
+                num_episodes=requested_episodes,
+                output_dir=self.workspace / "embodied" / "datasets" / f"{setup.setup_id}_{skill_name}_{timestamp}",
+                on_progress=on_progress,
+            )
+            self._sync_runtime_state(session, setup_id=setup.setup_id, runtime=context.runtime)
+            return EmbodiedToolResult(
+                ok=collection.ok,
+                action=action,
+                setup_id=setup.setup_id,
+                runtime_status=context.runtime.status.value,
+                message=collection.message,
+                details={
+                    "dataset_path": collection.dataset_path,
+                    "episodes_requested": collection.episodes_requested,
+                    "episodes_completed": collection.episodes_completed,
+                    "episodes_failed": collection.episodes_failed,
+                },
             )
         else:
             return EmbodiedToolResult(

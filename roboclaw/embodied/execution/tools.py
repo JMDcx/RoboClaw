@@ -74,7 +74,7 @@ class EmbodiedControlTool(Tool):
     def description(self) -> str:
         return (
             "Execute one embodied action through the strong procedure pipeline. "
-            "Supported actions: connect, calibrate, debug, reset, run_primitive, run_skill."
+            "Supported actions: connect, calibrate, debug, reset, run_primitive, run_skill, collect_data."
         )
 
     @property
@@ -84,7 +84,7 @@ class EmbodiedControlTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["connect", "calibrate", "debug", "reset", "run_primitive", "run_skill"],
+                    "enum": ["connect", "calibrate", "debug", "reset", "run_primitive", "run_skill", "collect_data"],
                     "description": "Embodied action to execute.",
                 },
                 "setup_id": {
@@ -101,11 +101,17 @@ class EmbodiedControlTool(Tool):
                 },
                 "skill_name": {
                     "type": "string",
-                    "description": "Required when action is run_skill.",
+                    "description": "Required when action is run_skill or collect_data.",
                 },
                 "skill_args": {
                     "type": "object",
                     "description": "Optional skill arguments for run_skill.",
+                },
+                "num_episodes": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "description": "How many episodes to collect when action is collect_data.",
                 },
             },
             "required": ["action"],
@@ -119,6 +125,7 @@ class EmbodiedControlTool(Tool):
         primitive_args: dict[str, Any] | None = None,
         skill_name: str | None = None,
         skill_args: dict[str, Any] | None = None,
+        num_episodes: int | None = None,
         **kwargs: Any,
     ) -> str:
         if self._session is None:
@@ -131,6 +138,7 @@ class EmbodiedControlTool(Tool):
             primitive_args=primitive_args,
             skill_name=skill_name,
             skill_args=skill_args,
+            num_episodes=num_episodes,
             on_progress=self._on_progress,
         )
         return json.dumps(result.to_dict(), ensure_ascii=False, sort_keys=True)
