@@ -28,7 +28,7 @@
 - [x] 3. 数据采集 GUI：采集时自动启动 HTTP 可视化界面（摄像头画面 + episode 进度 + 关节状态），借鉴 LeRobot，映射端口供远程浏览器访问 ✅
 - [x] 4. ACT 训练 recipe：借鉴 LeRobot ACT 实现，作为第一个内置可训练 policy（依赖 #2） ✅
 - [x] 5. Layer 2 能力查询接口：从 primitive 的 CapabilityFamily 自动聚合本体能力，Agent 可查询 ✅
-- [ ] 6. 接入 PiperX 作为第二个 builtin 本体，参考 Evo-RL（GitHub），验证框架泛化（依赖 #5）
+- [x] 6. 接入 PiperX 作为第二个 builtin 本体，参考 Evo-RL（GitHub），验证框架泛化（依赖 #5） ✅
 - [ ] 7. 验收测试（见 `docs/acceptance-test.md`）：A1 夹爪开合 / A4 仿真体验 / A6 采集 10 episode / A7 训练 ACT policy
 
 
