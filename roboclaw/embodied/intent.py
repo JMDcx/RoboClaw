@@ -42,8 +42,7 @@ _SETUP_EDIT_KEYWORDS = (
 _SERIAL_RE = re.compile(r"(/dev/[^\s,;]+)")
 
 
-def _normalize_token(value: str | None) -> str:
-    return re.sub(r"[\s\-_]+", "", str(value or "").strip().lower())
+from roboclaw.utils.helpers import normalize_token as _normalize_token
 
 
 @dataclass(frozen=True)
@@ -114,13 +113,8 @@ class IntentClassifier:
         )
 
     def _parse_response(self, response: str) -> UserIntent:
-        text = response.strip()
-        if text.startswith("```"):
-            parts = text.split("```")
-            if len(parts) >= 2:
-                text = parts[1].strip()
-                if text.startswith("json"):
-                    text = text[4:].strip()
+        from roboclaw.utils.helpers import strip_code_fences
+        text = strip_code_fences(response)
 
         data = _json.loads(text)
         valid_fields = set(UserIntent.__dataclass_fields__)

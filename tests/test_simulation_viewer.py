@@ -61,7 +61,16 @@ def _patch_modules(monkeypatch: pytest.MonkeyPatch, mujoco_module):
 
 
 def _runtime():
-    return SimpleNamespace(_model=object(), _data=object())
+    mujoco_mod = _fake_mujoco()
+    m, d = object(), object()
+    return SimpleNamespace(
+        _model=m,
+        _data=d,
+        model=m,
+        data=d,
+        _mujoco=mujoco_mod,
+        _import_mujoco=lambda: mujoco_mod,
+    )
 
 
 def test_simulation_viewer_instantiation():

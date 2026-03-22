@@ -280,13 +280,11 @@ class EmbodiedExecutionController:
                 metadata=msg.metadata or {},
             )
         content = msg.content.strip()
-        if not content:
-            result = await self.executor.advance_calibration(context, user_input=content, on_progress=on_progress)
-            self._sync_calibration_state(session, setup_id=setup.setup_id, runtime_id=context.runtime.id, result=result)
-        elif self._looks_like_calibration_request(content):
+        if self._looks_like_calibration_request(content):
             result = self.executor.describe_calibration(context)
         else:
-            result = self.executor.describe_calibration(context)
+            result = await self.executor.advance_calibration(context, user_input=content, on_progress=on_progress)
+            self._sync_calibration_state(session, setup_id=setup.setup_id, runtime_id=context.runtime.id, result=result)
 
         self._sync_runtime_state(session, setup_id=setup.setup_id, runtime=context.runtime)
         if result.ok and result.procedure == ProcedureKind.CALIBRATE:

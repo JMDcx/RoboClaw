@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from roboclaw.embodied.builtins.model import BuiltinEmbodiment
@@ -10,16 +9,13 @@ from roboclaw.embodied.execution.orchestration.runtime.calibration import (
     CalibrationDriver,
 )
 from roboclaw.embodied.probes import ProbeProvider
+from roboclaw.utils.helpers import normalize_token as _normalize_token
 
 _BUILTINS_BY_ID: dict[str, BuiltinEmbodiment] = {}
 _BUILTINS_BY_ROBOT_ID: dict[str, BuiltinEmbodiment] = {}
 _CALIBRATION_DRIVERS: dict[str, CalibrationDriver] = {}
 _PROBE_PROVIDERS: dict[str, ProbeProvider] = {}
 _DEFAULTS_LOADED = False
-
-
-def _normalize_token(value: str | None) -> str:
-    return re.sub(r"[\s\-_]+", "", str(value or "").strip().lower())
 
 
 def register_builtin_embodiment(

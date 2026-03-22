@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import threading
 import time
 from typing import Any
@@ -36,18 +35,15 @@ class SimulationSession:
         raise ValueError(f"Unsupported viewer mode: {mode}")
 
     def _resolve_mode(self) -> str:
-        if self._viewer_mode != "auto":
-            return self._viewer_mode
-        if os.environ.get("DISPLAY") or sys.platform == "darwin":
-            return "native"
-        return "web"
+        from roboclaw.embodied.simulation import resolve_viewer_mode
+        return resolve_viewer_mode(self._viewer_mode)
 
     def _run_native(self, node: Any, lock: threading.RLock) -> None:
         import mujoco
         import mujoco.viewer
         import rclpy
 
-        model, data = self._runtime._model, self._runtime._data
+        model, data = self._runtime.model, self._runtime.data
         print("ROBOCLAW_SIM_VIEWER_MODE=native", flush=True)
         spin_thread = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
         spin_thread.start()
@@ -69,7 +65,7 @@ class SimulationSession:
 
         from roboclaw.embodied.simulation.viewer import SimulationViewer
 
-        model, data = self._runtime._model, self._runtime._data
+        model, data = self._runtime.model, self._runtime.data
         viewer = SimulationViewer(self._runtime, port=self._viewer_port)
         viewer.start()
         print(f"ROBOCLAW_SIM_VIEWER_URL=http://0.0.0.0:{viewer.port}", flush=True)

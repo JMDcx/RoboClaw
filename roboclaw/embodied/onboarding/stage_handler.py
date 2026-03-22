@@ -195,7 +195,7 @@ class StageHandler:
             self.asset_generator.write_adapter,
         ):
             state = await writer(state, on_progress=on_progress)
-        issues = self._validation_issues()
+        issues = self._validation_issues(setup_id=state.setup_id)
         if issues is not None:
             return {
                 "state": replace(state, stage=SetupStage.VALIDATE_SETUP),
@@ -467,7 +467,7 @@ class StageHandler:
     ) -> tuple[SetupOnboardingState, dict[str, Any] | None]:
         if state.stage != SetupStage.VALIDATE_SETUP:
             return state, None
-        issues = self._validation_issues()
+        issues = self._validation_issues(setup_id=state.setup_id)
         if issues is not None:
             return state, {"state": state, "content": validation_failed_message(language, issues)}
         return replace(state, stage=SetupStage.HANDOFF_READY, status=SetupStatus.READY), None
@@ -475,11 +475,17 @@ class StageHandler:
     def _ready_response(self, state: SetupOnboardingState, *, language: str | None) -> dict[str, Any]:
         return {"state": state, "content": final_ready_message(language, state)}
 
-    def _validation_issues(self) -> str | None:
+    def _validation_issues(self, setup_id: str | None = None) -> str | None:
         validation = inspect_workspace_assets(
             self.workspace,
             options=WorkspaceInspectOptions(lint_profile=WorkspaceLintProfile.BASIC),
         )
         if not validation.has_errors:
             return None
-        return "\n".join(f"- {issue.path}: {issue.message}" for issue in validation.issues[:5])
+        # Only report issues related to this setup's assets
+        issues = validation.issues
+        if setup_id:
+            issues = [i for i in issues if setup_id in i.path]
+        if not issues:
+            return None
+        return "\n".join(f"- {issue.path}: {issue.message}" for issue in issues[:5])

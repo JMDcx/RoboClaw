@@ -3,9 +3,8 @@
 from roboclaw.embodied.builtins.model import BuiltinEmbodiment
 from roboclaw.embodied.builtins.registry import register_builtin_embodiment
 from roboclaw.embodied.definition.components.robots import PIPERX_ROBOT
-from roboclaw.embodied.definition.foundation.schema import CapabilityFamily
 from roboclaw.embodied.execution.integration.adapters.ros2.profiles import PrimitiveAliasSpec, PrimitiveServiceSpec, Ros2EmbodimentProfile
-from roboclaw.embodied.execution.orchestration.skills import SkillSpec, SkillStep
+from roboclaw.embodied.execution.orchestration.skills import DEFAULT_ARM_SKILLS
 
 PIPERX_ROS2_PROFILE = Ros2EmbodimentProfile(
     id="piperx_ros2_standard",
@@ -27,22 +26,9 @@ PIPERX_BUILTIN = BuiltinEmbodiment(
     id="piperx",
     robot=PIPERX_ROBOT,
     ros2_profile=PIPERX_ROS2_PROFILE,
-    sim_model_path="roboclaw/embodied/simulation/models/piperx.urdf",
+    sim_model_path=None,
     onboarding_aliases=("piperx", "piper x", "agilex piperx"),
-    skills=(
-        SkillSpec(
-            name="pick_and_place",
-            description="Open, home, close, home, and release.",
-            steps=(SkillStep("gripper_open"), SkillStep("go_named_pose", {"name": "home"}), SkillStep("gripper_close"), SkillStep("go_named_pose", {"name": "home"}), SkillStep("gripper_open")),
-            required_capabilities=(CapabilityFamily.END_EFFECTOR, CapabilityFamily.NAMED_POSE),
-        ),
-        SkillSpec(
-            name="reset_arm",
-            description="Return to home and open the gripper.",
-            steps=(SkillStep("go_named_pose", {"name": "home"}), SkillStep("gripper_open")),
-            required_capabilities=(CapabilityFamily.NAMED_POSE,),
-        ),
-    ),
+    skills=DEFAULT_ARM_SKILLS,
 )
 
 register_builtin_embodiment(PIPERX_BUILTIN)

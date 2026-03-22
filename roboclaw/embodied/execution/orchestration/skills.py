@@ -30,6 +30,30 @@ class SkillSpec:
     required_capabilities: tuple[CapabilityFamily, ...] = field(default_factory=tuple)
 
 
+# Common skill definitions shared across embodiments
+PICK_AND_PLACE = SkillSpec(
+    name="pick_and_place",
+    description="Open, home, close, home, and release.",
+    steps=(
+        SkillStep("gripper_open"),
+        SkillStep("go_named_pose", {"name": "home"}),
+        SkillStep("gripper_close"),
+        SkillStep("go_named_pose", {"name": "home"}),
+        SkillStep("gripper_open"),
+    ),
+    required_capabilities=(CapabilityFamily.END_EFFECTOR, CapabilityFamily.NAMED_POSE),
+)
+
+RESET_ARM = SkillSpec(
+    name="reset_arm",
+    description="Return to home and open the gripper.",
+    steps=(SkillStep("go_named_pose", {"name": "home"}), SkillStep("gripper_open")),
+    required_capabilities=(CapabilityFamily.NAMED_POSE,),
+)
+
+DEFAULT_ARM_SKILLS = (PICK_AND_PLACE, RESET_ARM)
+
+
 async def execute_skill(
     executor: Any,
     context: Any,

@@ -596,12 +596,16 @@ class AgentLoop:
             self.sessions.save(session)
             return response
 
-        catalog = build_catalog(self.workspace)
-        snapshot = self.embodied_execution.build_agent_snapshot(session, catalog=catalog)
+        if not self.embodied_execution.looks_like_embodied_request(msg.content):
+            catalog = None
+            snapshot = self.embodied_execution.build_agent_snapshot(session)
+        else:
+            catalog = build_catalog(self.workspace)
+            snapshot = self.embodied_execution.build_agent_snapshot(session, catalog=catalog)
         if (
             snapshot.selected_setup_id is None
             and not snapshot.candidates
-            and self.embodied_execution.looks_like_embodied_request(msg.content, catalog=catalog)
+            and catalog is not None
         ):
             response = await self.onboarding.handle_message(
                 msg,

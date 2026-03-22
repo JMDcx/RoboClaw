@@ -40,9 +40,13 @@ class _ZeroPolicy:
 
 def _load_policy(checkpoint_path: str) -> Any:
     try:
-        loader = getattr(importlib.import_module("roboclaw.embodied.learning.policy"), "load_policy")
-        policy = loader(checkpoint_path)
-        return policy if hasattr(policy, "predict") else _ZeroPolicy()
+        torch = importlib.import_module("torch")
+        from roboclaw.embodied.learning.policies.act import ACTConfig, ACTPolicy
+        model = ACTPolicy(ACTConfig())
+        state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model
     except Exception:
         return _ZeroPolicy()
 

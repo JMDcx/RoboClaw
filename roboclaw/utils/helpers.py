@@ -70,6 +70,11 @@ def timestamp() -> str:
     return datetime.now().isoformat()
 
 
+def normalize_token(value: str | None) -> str:
+    """Normalize a string token for fuzzy matching (strip, lowercase, remove separators)."""
+    return re.sub(r"[\s\-_]+", "", str(value or "").strip().lower())
+
+
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 
 def safe_filename(name: str) -> str:

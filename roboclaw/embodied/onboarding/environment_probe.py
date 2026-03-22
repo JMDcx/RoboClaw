@@ -272,12 +272,16 @@ class EnvironmentProbe:
             options=WorkspaceInspectOptions(lint_profile=WorkspaceLintProfile.BASIC),
         )
         if validation.has_errors:
-            issues = "\n".join(f"- {issue.path}: {issue.message}" for issue in validation.issues[:5])
-            return (
-                state,
-                "The setup assets were written for calibration handoff, but validation is still failing:\n"
-                f"{issues}",
-            )
+            # Only block on issues related to this setup's assets
+            setup_prefix = state.setup_id or ""
+            relevant = [i for i in validation.issues if setup_prefix and setup_prefix in i.path] if setup_prefix else list(validation.issues)
+            if relevant:
+                issues = "\n".join(f"- {issue.path}: {issue.message}" for issue in relevant[:5])
+                return (
+                    state,
+                    "The setup assets were written for calibration handoff, but validation is still failing:\n"
+                    f"{issues}",
+                )
         return state, None
 
     async def prepare_ros2_install(

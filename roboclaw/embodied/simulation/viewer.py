@@ -53,20 +53,19 @@ class SimulationViewer:
         self._frame_content_type = "image/jpeg"
 
     def _import_mujoco(self) -> Any:
-        try:
-            return importlib.import_module("mujoco")
-        except ModuleNotFoundError as exc:
-            raise ModuleNotFoundError("Python package 'mujoco' is not installed.") from exc
+        return self.runtime._import_mujoco()
 
     def _import_pil_image(self) -> Any | None:
-        try:
-            return importlib.import_module("PIL.Image")
-        except ModuleNotFoundError:
-            return None
+        if not hasattr(self, "_pil_image_cache"):
+            try:
+                self._pil_image_cache = importlib.import_module("PIL.Image")
+            except ModuleNotFoundError:
+                self._pil_image_cache = None
+        return self._pil_image_cache
 
     def _require_runtime(self) -> tuple[Any, Any]:
-        model = self.runtime._model
-        data = self.runtime._data
+        model = self.runtime.model
+        data = self.runtime.data
         if model is None or data is None:
             raise RuntimeError("MuJoCo runtime is not running.")
         return model, data

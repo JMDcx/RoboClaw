@@ -33,14 +33,13 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     import os
-    import sys
+
+    from roboclaw.embodied.simulation import resolve_viewer_mode
 
     args = _parse_args()
 
     # Resolve viewer mode and set MUJOCO_GL *before* any MuJoCo import/model load.
-    viewer_mode = args.viewer_mode
-    if viewer_mode == "auto":
-        viewer_mode = "native" if (os.environ.get("DISPLAY") or sys.platform == "darwin") else "web"
+    viewer_mode = resolve_viewer_mode(args.viewer_mode)
     if viewer_mode == "web":
         os.environ.setdefault("MUJOCO_GL", "osmesa")
 
@@ -70,10 +69,7 @@ def main() -> None:
         last_primitive: list[str | None] = [None]
         last_error: list[str | None] = [None]
 
-        class SimNode(Node):
-            pass
-
-        node = SimNode("roboclaw_mujoco_sim")
+        node = Node("roboclaw_mujoco_sim")
 
         string_cls = String
         state_pub = node.create_publisher(String, f"{ns}/state", 10)

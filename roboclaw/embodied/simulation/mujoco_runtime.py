@@ -15,10 +15,14 @@ class MujocoRuntime:
         self.joint_mapping = joint_mapping or {}
         self._model: Any | None = None
         self._data: Any | None = None
+        self._mujoco: Any | None = None
 
     def _import_mujoco(self) -> Any:
+        if self._mujoco is not None:
+            return self._mujoco
         try:
-            return importlib.import_module("mujoco")
+            self._mujoco = importlib.import_module("mujoco")
+            return self._mujoco
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError("Python package 'mujoco' is not installed.") from exc
 
@@ -37,6 +41,14 @@ class MujocoRuntime:
     def _zero_values(values: Any) -> None:
         for idx in range(len(values)):
             values[idx] = 0.0
+
+    @property
+    def model(self) -> Any:
+        return self._model
+
+    @property
+    def data(self) -> Any:
+        return self._data
 
     @property
     def is_running(self) -> bool:
