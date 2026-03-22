@@ -77,7 +77,7 @@ def main() -> None:
     import torch
     from torch.utils.data import DataLoader, TensorDataset
 
-    from roboclaw.research.policies.act import ACTConfig, ACTPolicy
+    from roboclaw.embodied.learning.policies.act import ACTConfig, ACTPolicy
 
     config = ACTConfig(lr=args.lr)
     state, actions = _tensors(Path(args.dataset), config)

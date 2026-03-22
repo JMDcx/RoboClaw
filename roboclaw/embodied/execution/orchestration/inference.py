@@ -40,7 +40,7 @@ class _ZeroPolicy:
 
 def _load_policy(checkpoint_path: str) -> Any:
     try:
-        loader = getattr(importlib.import_module("roboclaw.research.policy"), "load_policy")
+        loader = getattr(importlib.import_module("roboclaw.embodied.learning.policy"), "load_policy")
         policy = loader(checkpoint_path)
         return policy if hasattr(policy, "predict") else _ZeroPolicy()
     except Exception:

@@ -487,8 +487,8 @@ class OnboardingController:
             state = replace(
                 state,
                 deployment_id=f"{state.assembly_id}_sim_local",
-                adapter_id=f"{state.assembly_id}_sim_direct",
-                execution_targets=[{"id": "sim", "carrier": "sim", "transport": "direct", "simulator": "mujoco"}],
+                adapter_id=f"{state.assembly_id}_sim_ros2",
+                execution_targets=[{"id": "sim", "carrier": "sim", "transport": "ros2", "simulator": "mujoco"}],
                 detected_facts={
                     **state.detected_facts,
                     "simulation_requested": True,
@@ -1513,7 +1513,7 @@ class OnboardingController:
         launch_command = self._launch_command(state)
         launch_line = f"        'launch_command': {launch_command!r}," if launch_command else None
         connection_lines = (
-            ["        'transport': 'direct',", "        'simulator': 'mujoco',", f"        'model_path': {facts.get('sim_model_path')!r},", f"        'joint_mapping': {(facts.get('sim_joint_mapping') or {})!r},"]
+            ["        'transport': 'ros2',", "        'profile_id': 'mujoco_sim',", f"        'namespace': '/roboclaw/{state.assembly_id}/sim',", f"        'model_path': {facts.get('sim_model_path')!r},", f"        'joint_mapping': {(facts.get('sim_joint_mapping') or {})!r},"]
             if is_sim else
             ["        'transport': 'ros2',", f"        'ros_distro': {self._resolved_ros2_distro(state)!r},", f"        'profile_id': {self._profile_id(state)!r},", f"        'namespace': {namespace!r},", f"        'serial_device_by_id': {facts.get('serial_device_by_id')!r},"]
         )
@@ -1565,8 +1565,8 @@ class OnboardingController:
 
     def _render_adapter(self, state: SetupOnboardingState) -> str:
         is_sim = state.detected_facts.get("simulation_requested") is True
-        implementation = "roboclaw.embodied.execution.integration.adapters.sim:MujocoSimAdapter" if is_sim else "roboclaw.embodied.execution.integration.adapters.ros2.standard:Ros2ActionServiceAdapter"
-        compatibility_lines = ["        VersionConstraint(", "            component=CompatibilityComponent.TRANSPORT,", f"            target={'direct' if is_sim else 'ros2'!r},", "            requirement='>=1.0,<2.0',", "        ),"]
+        implementation = "roboclaw.embodied.execution.integration.adapters.ros2.standard:Ros2ActionServiceAdapter"
+        compatibility_lines = ["        VersionConstraint(", "            component=CompatibilityComponent.TRANSPORT,", "            target='ros2',", "            requirement='>=1.0,<2.0',", "        ),"]
         if not is_sim:
             compatibility_lines.extend(["        VersionConstraint(", "            component=CompatibilityComponent.CONTROL_SURFACE_PROFILE,", f"            target={ARM_HAND_CONTROL_SURFACE_PROFILE.id!r},", "            requirement='>=1.0,<2.0',", "        ),"])
         return "\n".join(

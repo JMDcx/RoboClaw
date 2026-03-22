@@ -53,7 +53,7 @@ class ACTConfig:
 class ACTPolicy(nn.Module if nn is not None else object):
     def __init__(self, config: ACTConfig):
         if nn is None:
-            raise ModuleNotFoundError("torch is required for roboclaw.research.policies.act")
+            raise ModuleNotFoundError("torch is required for roboclaw.embodied.learning.policies.act")
         super().__init__()
         self.config = config
         self.state_encoder = nn.Linear(config.state_dim, config.hidden_dim)
@@ -90,7 +90,7 @@ class ACTPolicy(nn.Module if nn is not None else object):
 
     def predict(self, state: dict[str, Any]) -> dict[str, float]:
         if torch is None:
-            raise ModuleNotFoundError("torch is required for roboclaw.research.policies.act")
+            raise ModuleNotFoundError("torch is required for roboclaw.embodied.learning.policies.act")
         keys, values = _vector(state, self.config.state_dim, nested=("joint_positions",))
         device = next(self.parameters()).device
         tensor = torch.tensor([values], dtype=torch.float32, device=device)

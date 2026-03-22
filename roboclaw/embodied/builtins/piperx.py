@@ -27,6 +27,7 @@ PIPERX_BUILTIN = BuiltinEmbodiment(
     id="piperx",
     robot=PIPERX_ROBOT,
     ros2_profile=PIPERX_ROS2_PROFILE,
+    sim_model_path="roboclaw/embodied/simulation/models/piperx.urdf",
     onboarding_aliases=("piperx", "piper x", "agilex piperx"),
     skills=(
         SkillSpec(

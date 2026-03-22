@@ -64,7 +64,7 @@ async def test_run_training_returns_failure_on_nonzero_exit(tmp_path: Path, monk
     monkeypatch.setattr(training.shutil, "which", lambda name: None)
 
     async def fake_create(*command, **kwargs):
-        assert command[:3] == (sys.executable, "-m", "roboclaw.research.train")
+        assert command[:3] == (sys.executable, "-m", "roboclaw.embodied.learning.train")
         return _Process(["epoch 2/5"], 1)
 
     monkeypatch.setattr(training.asyncio, "create_subprocess_exec", fake_create)

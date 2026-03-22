@@ -47,6 +47,27 @@ for file in roboclaw/embodied/builtins/*.py; do
 done
 
 echo ""
+echo "  -- simulation (MuJoCo physics + ROS2 bridge) --"
+for dir in simulation; do
+  count=$(find "roboclaw/embodied/$dir" -name "*.py" -exec cat {} + 2>/dev/null | wc -l)
+  printf "  %-40s %5s lines\n" "$dir/" "$count"
+done
+
+echo ""
+echo "  -- perception (camera, streaming, snapshot) --"
+for dir in perception; do
+  count=$(find "roboclaw/embodied/$dir" -name "*.py" -exec cat {} + 2>/dev/null | wc -l)
+  printf "  %-40s %5s lines\n" "$dir/" "$count"
+done
+
+echo ""
+echo "  -- learning (data collection, training, policies) --"
+for dir in learning; do
+  count=$(find "roboclaw/embodied/$dir" -name "*.py" -exec cat {} + 2>/dev/null | wc -l)
+  printf "  %-40s %5s lines\n" "$dir/" "$count"
+done
+
+echo ""
 echo "  -- root --"
 count=$(cat roboclaw/embodied/__init__.py 2>/dev/null | wc -l)
 printf "  %-40s %5s lines\n" "__init__.py" "$count"

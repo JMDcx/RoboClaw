@@ -7,8 +7,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from roboclaw.research.policies.act import ACTConfig, ACTPolicy
-from roboclaw.research.train import main
+from roboclaw.embodied.learning.policies.act import ACTConfig, ACTPolicy
+from roboclaw.embodied.learning.train import main
 
 
 def test_act_forward_shapes() -> None:

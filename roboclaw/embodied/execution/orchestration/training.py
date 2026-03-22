@@ -32,7 +32,7 @@ class TrainingResult:
 
 
 def _command() -> list[str]:
-    return ["roboclaw-train"] if shutil.which("roboclaw-train") else [sys.executable, "-m", "roboclaw.research.train"]
+    return ["roboclaw-train"] if shutil.which("roboclaw-train") else [sys.executable, "-m", "roboclaw.embodied.learning.train"]
 
 
 def _epoch(line: str) -> int | None:
