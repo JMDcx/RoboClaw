@@ -22,3 +22,4 @@ poetry.lock
 .pytest_cache/
 botpy.log
 CLAUDE.md
+.claude/
