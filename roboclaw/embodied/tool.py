@@ -1,5 +1,6 @@
 """Embodied tool — bridges agent to the embodied robotics layer."""
 
+from pathlib import Path
 from typing import Any
 
 from roboclaw.agent.tools.base import Tool
@@ -15,10 +16,10 @@ _ACTIONS = [
 ]
 
 _DEFAULT_PORT = "/dev/ttyACM0"
-_DEFAULT_CALIBRATION_DIR = "~/.roboclaw/workspace/embodied/calibration/so101"
-_DATASET_ROOT = "~/.roboclaw/workspace/embodied/datasets"
-_POLICY_OUTPUT = "~/.roboclaw/workspace/embodied/policies"
-_LOGS_DIR = "~/.roboclaw/workspace/embodied/jobs"
+_DEFAULT_CALIBRATION_DIR = Path("~/.roboclaw/workspace/embodied/calibration/so101").expanduser()
+_DATASET_ROOT = Path("~/.roboclaw/workspace/embodied/datasets").expanduser()
+_POLICY_OUTPUT = Path("~/.roboclaw/workspace/embodied/policies").expanduser()
+_LOGS_DIR = Path("~/.roboclaw/workspace/embodied/jobs").expanduser()
 
 
 class EmbodiedTool(Tool):
@@ -89,86 +90,79 @@ class EmbodiedTool(Tool):
             "required": ["action"],
         }
 
-    async def execute(self, action: str, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
-        from roboclaw.embodied.learning.act_pipeline import ACTPipeline
-        from roboclaw.embodied.learning.runner import LocalLeRobotRunner
+        from roboclaw.embodied.learning.act import ACTPipeline
+        from roboclaw.embodied.runner import LocalLeRobotRunner
 
+        action = kwargs.get("action", "")
         port = kwargs.get("port", _DEFAULT_PORT)
-        calibration_dir = kwargs.get("calibration_dir", _DEFAULT_CALIBRATION_DIR)
-
-        controller = SO101Controller()
-        pipeline = ACTPipeline()
+        calibration_dir = kwargs.get("calibration_dir", str(_DEFAULT_CALIBRATION_DIR))
         runner = LocalLeRobotRunner()
 
         if action == "doctor":
-            return self._run_sync(runner, controller.doctor())
+            controller = SO101Controller()
+            return await self._run(runner, controller.doctor())
 
         if action == "calibrate":
-            argv = controller.calibrate(port=port, calibration_dir=calibration_dir)
-            return self._run_sync(runner, argv)
+            controller = SO101Controller()
+            return await self._run(runner, controller.calibrate(robot_port=port, calibration_dir=calibration_dir))
 
         if action == "teleoperate":
-            argv = controller.teleoperate(port=port, calibration_dir=calibration_dir)
-            return self._run_sync(runner, argv)
+            controller = SO101Controller()
+            return await self._run(runner, controller.teleoperate(robot_port=port, calibration_dir=calibration_dir))
 
         if action == "record":
+            controller = SO101Controller()
             argv = controller.record(
-                port=port,
+                robot_port=port,
                 calibration_dir=calibration_dir,
                 dataset_name=kwargs.get("dataset_name", "default"),
                 task=kwargs.get("task", "default_task"),
                 num_episodes=kwargs.get("num_episodes", 10),
                 fps=kwargs.get("fps", 30),
             )
-            return self._run_sync(runner, argv)
+            return await self._run(runner, argv)
 
         if action == "train":
-            return self._handle_train(runner, pipeline, kwargs)
+            pipeline = ACTPipeline()
+            return await self._handle_train(runner, pipeline, kwargs)
 
         if action == "run_policy":
-            checkpoint = kwargs.get("checkpoint_path")
-            if not checkpoint:
-                checkpoint = pipeline.checkpoint_path(_POLICY_OUTPUT)
+            controller = SO101Controller()
+            pipeline = ACTPipeline()
+            checkpoint = kwargs.get("checkpoint_path") or pipeline.checkpoint_path(str(_POLICY_OUTPUT))
             argv = controller.run_policy(
-                port=port,
+                robot_port=port,
                 calibration_dir=calibration_dir,
                 checkpoint_path=checkpoint,
                 num_episodes=kwargs.get("num_episodes", 1),
             )
-            return self._run_sync(runner, argv)
+            return await self._run(runner, argv)
 
         if action == "job_status":
             job_id = kwargs.get("job_id", "")
-            status = runner.job_status(job_id=job_id, log_dir=_LOGS_DIR)
-            return self._format_job_status(status)
+            status = await runner.job_status(job_id=job_id, log_dir=_LOGS_DIR)
+            return "\n".join(f"{k}: {v}" for k, v in status.items())
 
         return f"Unknown action: {action}"
 
     @staticmethod
-    def _run_sync(runner: Any, argv: list[str]) -> str:
-        returncode, stdout, stderr = runner.run(argv)
+    async def _run(runner: Any, argv: list[str]) -> str:
+        returncode, stdout, stderr = await runner.run(argv)
         if returncode != 0:
             return f"Command failed (exit {returncode}).\nstdout: {stdout}\nstderr: {stderr}"
         return stdout or "Done."
 
     @staticmethod
-    def _handle_train(runner: Any, pipeline: Any, kwargs: dict[str, Any]) -> str:
+    async def _handle_train(runner: Any, pipeline: Any, kwargs: dict[str, Any]) -> str:
         dataset_name = kwargs.get("dataset_name", "default")
-        dataset_path = f"{_DATASET_ROOT}/{dataset_name}"
-        device = kwargs.get("device", "cuda")
-        steps = kwargs.get("steps", 100_000)
-
+        dataset_path = str(_DATASET_ROOT / dataset_name)
         argv = pipeline.train(
             dataset_path=dataset_path,
-            output_dir=_POLICY_OUTPUT,
-            steps=steps,
-            device=device,
+            output_dir=str(_POLICY_OUTPUT),
+            steps=kwargs.get("steps", 100_000),
+            device=kwargs.get("device", "cuda"),
         )
-        job_id = runner.run_detached(argv=argv, log_dir=_LOGS_DIR)
+        job_id = await runner.run_detached(argv=argv, log_dir=_LOGS_DIR)
         return f"Training started. Job ID: {job_id}"
-
-    @staticmethod
-    def _format_job_status(status: dict[str, Any]) -> str:
-        lines = [f"{k}: {v}" for k, v in status.items()]
-        return "\n".join(lines)

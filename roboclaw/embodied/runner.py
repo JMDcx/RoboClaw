@@ -85,6 +85,8 @@ class LocalLeRobotRunner:
             os.kill(pid, 0)
         except ProcessLookupError:
             return False
+        except PermissionError:
+            return True
         return True
 
     def _job_log_path(self, job_id: str, log_dir: Path) -> Path:
