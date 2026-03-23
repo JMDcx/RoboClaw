@@ -24,7 +24,6 @@ from roboclaw.agent.tools.registry import ToolRegistry
 from roboclaw.agent.tools.shell import ExecTool
 from roboclaw.agent.tools.spawn import SpawnTool
 from roboclaw.agent.tools.web import WebFetchTool, WebSearchTool
-from roboclaw.embodied.tool import EmbodiedTool
 from roboclaw.bus.events import InboundMessage, OutboundMessage
 from roboclaw.bus.queue import MessageBus
 from roboclaw.providers.base import LLMProvider
@@ -134,6 +133,7 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
         if not self.restrict_to_workspace:
+            from roboclaw.embodied.tool import EmbodiedTool
             self.tools.register(EmbodiedTool())
 
     async def _connect_mcp(self) -> None:
