@@ -102,15 +102,10 @@ class EmbodiedTool(Tool):
         from roboclaw.embodied.setup import ensure_setup, load_setup, update_setup
 
         action = kwargs.get("action", "")
-        setup = ensure_setup()
-        runner = LocalLeRobotRunner()
-
-        port = kwargs.get("port") or setup.get("robot", {}).get("port", "")
-        calibration_dir = kwargs.get("calibration_dir") or setup.get("calibration", {}).get("dir", "")
-        dataset_root = setup.get("datasets", {}).get("root", "")
 
         if action == "setup_show":
-            return json.dumps(load_setup(), indent=2, ensure_ascii=False)
+            setup = load_setup()
+            return json.dumps(setup, indent=2, ensure_ascii=False)
 
         if action == "setup_update":
             updates = kwargs.get("updates", {})
@@ -118,6 +113,12 @@ class EmbodiedTool(Tool):
                 return "No updates provided."
             updated = update_setup(updates)
             return f"Setup updated:\n{json.dumps(updated, indent=2, ensure_ascii=False)}"
+
+        setup = ensure_setup()
+        runner = LocalLeRobotRunner()
+        port = kwargs.get("port") or setup.get("robot", {}).get("port", "")
+        calibration_dir = kwargs.get("calibration_dir") or setup.get("calibration", {}).get("dir", "")
+        dataset_root = setup.get("datasets", {}).get("root", "")
 
         if action == "doctor":
             controller = SO101Controller()
@@ -148,7 +149,7 @@ class EmbodiedTool(Tool):
         if action == "train":
             pipeline = ACTPipeline()
             dataset_name = kwargs.get("dataset_name", "default")
-            dataset_path = str(Path(dataset_root) / dataset_name) if dataset_root else str(_POLICY_OUTPUT / dataset_name)
+            dataset_path = str(Path(dataset_root) / dataset_name)
             argv = pipeline.train(
                 dataset_path=dataset_path,
                 output_dir=str(_POLICY_OUTPUT),

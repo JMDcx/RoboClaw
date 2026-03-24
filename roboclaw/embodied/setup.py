@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,7 @@ _DEFAULT_SETUP: dict[str, Any] = {
 def load_setup(path: Path = SETUP_PATH) -> dict[str, Any]:
     """Load setup.json, return defaults if not found."""
     if not path.exists():
-        return dict(_DEFAULT_SETUP)
+        return copy.deepcopy(_DEFAULT_SETUP)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -42,8 +43,9 @@ def ensure_setup(path: Path = SETUP_PATH) -> dict[str, Any]:
     """Load setup.json if exists, otherwise create with defaults and return."""
     if path.exists():
         return load_setup(path)
-    save_setup(_DEFAULT_SETUP, path)
-    return dict(_DEFAULT_SETUP)
+    defaults = copy.deepcopy(_DEFAULT_SETUP)
+    save_setup(defaults, path)
+    return defaults
 
 
 def update_setup(updates: dict[str, Any], path: Path = SETUP_PATH) -> dict[str, Any]:

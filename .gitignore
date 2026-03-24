@@ -24,3 +24,4 @@ nano.*.save
 .DS_Store
 uv.lock
 docs/
+.claude/scheduled_tasks.lock
