@@ -52,10 +52,6 @@ class EmbodiedTool(Tool):
                     "enum": _ACTIONS,
                     "description": "The action to perform.",
                 },
-                "arm_role": {
-                    "type": "string",
-                    "description": "Which arm to calibrate (e.g. 'follower', 'leader').",
-                },
                 "dataset_name": {
                     "type": "string",
                     "description": "Name for the dataset.",
@@ -116,7 +112,7 @@ class EmbodiedTool(Tool):
         if action == "doctor":
             return await self._do_doctor(setup)
         if action == "calibrate":
-            return await self._do_calibrate(setup, kwargs)
+            return await self._do_calibrate(setup)
         if action == "teleoperate":
             return await self._do_teleoperate(setup)
         if action == "record":
@@ -137,21 +133,24 @@ class EmbodiedTool(Tool):
         result = await self._run(LocalLeRobotRunner(), SO101Controller().doctor())
         return result + f"\n\nCurrent setup:\n{json.dumps(setup, indent=2, ensure_ascii=False)}"
 
-    async def _do_calibrate(self, setup: dict, kwargs: dict) -> str:
+    async def _do_calibrate(self, setup: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
         from roboclaw.embodied.runner import LocalLeRobotRunner
 
-        arm_role = kwargs.get("arm_role", "")
-        arm = setup.get("arms", {}).get(arm_role)
-        if not arm:
-            available = list(setup.get("arms", {}).keys())
-            return f"Arm '{arm_role}' not found in setup. Available: {available}"
-        argv = SO101Controller().calibrate(
-            arm_type=arm["type"],
-            arm_port=arm["port"],
-            calibration_dir=arm.get("calibration_dir", ""),
-        )
-        return await self._run(LocalLeRobotRunner(), argv)
+        arms = setup.get("arms", {})
+        if not arms:
+            return "No arms configured in setup. Use setup_update to add arms first."
+        uncalibrated = {name: arm for name, arm in arms.items() if not arm.get("calibrated")}
+        if not uncalibrated:
+            return "All arms are already calibrated."
+        controller = SO101Controller()
+        runner = LocalLeRobotRunner()
+        results = []
+        for name, arm in uncalibrated.items():
+            argv = controller.calibrate(arm["type"], arm["port"], arm.get("calibration_dir", ""))
+            output = await self._run(runner, argv)
+            results.append(f"{name}: {output}")
+        return f"Calibrated {len(results)} arm(s).\n" + "\n".join(results)
 
     async def _do_teleoperate(self, setup: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
