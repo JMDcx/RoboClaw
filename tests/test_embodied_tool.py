@@ -77,10 +77,12 @@ async def test_calibrate_all_arms() -> None:
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.setup.update_setup"),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="calibrate")
 
+    assert "2 succeeded" in result
     assert "follower" in result
     assert "leader" in result
     assert mock_runner.run.call_count == 2

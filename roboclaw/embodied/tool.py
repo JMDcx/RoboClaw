@@ -136,21 +136,30 @@ class EmbodiedTool(Tool):
     async def _do_calibrate(self, setup: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
         from roboclaw.embodied.runner import LocalLeRobotRunner
+        from roboclaw.embodied.setup import update_setup
 
         arms = setup.get("arms", {})
         if not arms:
             return "No arms configured in setup. Use setup_update to add arms first."
-        uncalibrated = {name: arm for name, arm in arms.items() if not arm.get("calibrated")}
+        uncalibrated = {name: arm for name, arm in arms.items() if arm.get("calibrated") is not True}
         if not uncalibrated:
             return "All arms are already calibrated."
         controller = SO101Controller()
         runner = LocalLeRobotRunner()
+        succeeded, failed = 0, 0
         results = []
         for name, arm in uncalibrated.items():
             argv = controller.calibrate(arm["type"], arm["port"], arm.get("calibration_dir", ""))
-            output = await self._run(runner, argv)
-            results.append(f"{name}: {output}")
-        return f"Calibrated {len(results)} arm(s).\n" + "\n".join(results)
+            returncode, stdout, stderr = await runner.run(argv)
+            if returncode == 0:
+                succeeded += 1
+                update_setup({"arms": {name: {"calibrated": True}}})
+                results.append(f"{name}: OK")
+            else:
+                failed += 1
+                results.append(f"{name}: FAILED (exit {returncode}) {stderr[:200]}")
+        summary = f"{succeeded} succeeded, {failed} failed."
+        return summary + "\n" + "\n".join(results)
 
     async def _do_teleoperate(self, setup: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
