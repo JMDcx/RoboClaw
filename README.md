@@ -21,6 +21,7 @@
 
 ## 📢 News
 
+- **2026-03-24** Conversational arm setup, calibration, teleoperation, data collection, training, and inference.
 - **2026-03-17** Embodied framework skeleton, domain contracts, and assembly-centered onboarding controller.
 - **2026-03-12** Repository created.
 
