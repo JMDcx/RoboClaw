@@ -1,5 +1,6 @@
 """Embodied tool — bridges agent to the embodied robotics layer."""
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -13,11 +14,10 @@ _ACTIONS = [
     "train",
     "run_policy",
     "job_status",
+    "setup_show",
+    "setup_update",
 ]
 
-_DEFAULT_PORT = "/dev/ttyACM0"
-_DEFAULT_CALIBRATION_DIR = Path("~/.roboclaw/workspace/embodied/calibration/so101").expanduser()
-_DATASET_ROOT = Path("~/.roboclaw/workspace/embodied/datasets").expanduser()
 _POLICY_OUTPUT = Path("~/.roboclaw/workspace/embodied/policies").expanduser()
 _LOGS_DIR = Path("~/.roboclaw/workspace/embodied/jobs").expanduser()
 
@@ -33,7 +33,8 @@ class EmbodiedTool(Tool):
     def description(self) -> str:
         return (
             "Control embodied robots — connect, calibrate, collect data, "
-            "train policies, and run inference."
+            "train policies, and run inference. "
+            "Use setup_show to view current robot config, setup_update to change it."
         )
 
     @property
@@ -48,7 +49,7 @@ class EmbodiedTool(Tool):
                 },
                 "port": {
                     "type": "string",
-                    "description": "Serial port for the robot.",
+                    "description": "Serial port (prefer /dev/serial/by-id/... for stability).",
                 },
                 "calibration_dir": {
                     "type": "string",
@@ -86,6 +87,10 @@ class EmbodiedTool(Tool):
                     "type": "string",
                     "description": "Device for training (default: cuda).",
                 },
+                "updates": {
+                    "type": "object",
+                    "description": "Fields to update in setup.json (for setup_update).",
+                },
             },
             "required": ["action"],
         }
@@ -94,15 +99,31 @@ class EmbodiedTool(Tool):
         from roboclaw.embodied.embodiment.so101 import SO101Controller
         from roboclaw.embodied.learning.act import ACTPipeline
         from roboclaw.embodied.runner import LocalLeRobotRunner
+        from roboclaw.embodied.setup import ensure_setup, load_setup, update_setup
 
         action = kwargs.get("action", "")
-        port = kwargs.get("port", _DEFAULT_PORT)
-        calibration_dir = kwargs.get("calibration_dir", str(_DEFAULT_CALIBRATION_DIR))
+        setup = ensure_setup()
         runner = LocalLeRobotRunner()
+
+        port = kwargs.get("port") or setup.get("robot", {}).get("port", "")
+        calibration_dir = kwargs.get("calibration_dir") or setup.get("calibration", {}).get("dir", "")
+        dataset_root = setup.get("datasets", {}).get("root", "")
+
+        if action == "setup_show":
+            return json.dumps(load_setup(), indent=2, ensure_ascii=False)
+
+        if action == "setup_update":
+            updates = kwargs.get("updates", {})
+            if not updates:
+                return "No updates provided."
+            updated = update_setup(updates)
+            return f"Setup updated:\n{json.dumps(updated, indent=2, ensure_ascii=False)}"
 
         if action == "doctor":
             controller = SO101Controller()
-            return await self._run(runner, controller.doctor())
+            result = await self._run(runner, controller.doctor())
+            setup_info = f"\n\nCurrent setup:\n{json.dumps(setup, indent=2, ensure_ascii=False)}"
+            return result + setup_info
 
         if action == "calibrate":
             controller = SO101Controller()
@@ -126,7 +147,16 @@ class EmbodiedTool(Tool):
 
         if action == "train":
             pipeline = ACTPipeline()
-            return await self._handle_train(runner, pipeline, kwargs)
+            dataset_name = kwargs.get("dataset_name", "default")
+            dataset_path = str(Path(dataset_root) / dataset_name) if dataset_root else str(_POLICY_OUTPUT / dataset_name)
+            argv = pipeline.train(
+                dataset_path=dataset_path,
+                output_dir=str(_POLICY_OUTPUT),
+                steps=kwargs.get("steps", 100_000),
+                device=kwargs.get("device", "cuda"),
+            )
+            job_id = await runner.run_detached(argv=argv, log_dir=_LOGS_DIR)
+            return f"Training started. Job ID: {job_id}"
 
         if action == "run_policy":
             controller = SO101Controller()
@@ -154,15 +184,4 @@ class EmbodiedTool(Tool):
             return f"Command failed (exit {returncode}).\nstdout: {stdout}\nstderr: {stderr}"
         return stdout or "Done."
 
-    @staticmethod
-    async def _handle_train(runner: Any, pipeline: Any, kwargs: dict[str, Any]) -> str:
-        dataset_name = kwargs.get("dataset_name", "default")
-        dataset_path = str(_DATASET_ROOT / dataset_name)
-        argv = pipeline.train(
-            dataset_path=dataset_path,
-            output_dir=str(_POLICY_OUTPUT),
-            steps=kwargs.get("steps", 100_000),
-            device=kwargs.get("device", "cuda"),
-        )
-        job_id = await runner.run_detached(argv=argv, log_dir=_LOGS_DIR)
-        return f"Training started. Job ID: {job_id}"
+

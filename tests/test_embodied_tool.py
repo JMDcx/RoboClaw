@@ -22,12 +22,13 @@ def test_tool_schema() -> None:
     expected_actions = [
         "doctor", "calibrate", "teleoperate", "record",
         "train", "run_policy", "job_status",
+        "setup_show", "setup_update",
     ]
     assert action_schema["enum"] == expected_actions
 
     for key in ("port", "calibration_dir", "dataset_name", "task",
                 "num_episodes", "fps", "steps", "checkpoint_path",
-                "job_id", "device"):
+                "job_id", "device", "updates"):
         assert key in params["properties"], f"Missing optional param: {key}"
 
 

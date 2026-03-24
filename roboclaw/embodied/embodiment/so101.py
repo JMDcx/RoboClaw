@@ -9,15 +9,16 @@ class SO101Controller:
     """Builds LeRobot CLI commands for SO101 robot arm."""
 
     def doctor(self) -> list[str]:
-        """Check lerobot, list supported robots, motors, and connected serial ports."""
+        """Check lerobot, list supported robots, motors, and connected serial ports (by-id)."""
         script = (
-            "import lerobot, glob; "
+            "import lerobot, glob, os; "
             "print(f'lerobot_version: {lerobot.__version__}'); "
             "print(f'supported_robots: {lerobot.available_robots}'); "
             "print(f'supported_motors: {lerobot.available_motors}'); "
             "print(f'supported_cameras: {lerobot.available_cameras}'); "
-            "ports = sorted(glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')); "
-            "print(f'connected_ports: {ports}')"
+            "by_id = sorted(glob.glob('/dev/serial/by-id/*')); "
+            "pairs = [(p, os.path.realpath(p)) for p in by_id]; "
+            "print(f'connected_ports_by_id: {pairs}')"
         )
         return ["python3", "-c", script]
 
