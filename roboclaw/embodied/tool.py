@@ -21,6 +21,11 @@ _ACTIONS = [
     "remove_arm",
     "set_camera",
     "remove_camera",
+    "g1_setup",
+    "g1_connect",
+    "g1_status",
+    "g1_move_joint",
+    "g1_go_named_pose",
 ]
 
 _LOGS_DIR = Path("~/.roboclaw/workspace/embodied/jobs").expanduser()
@@ -37,6 +42,7 @@ class EmbodiedTool(Tool):
 
     def __init__(self, tty_handoff: Any = None):
         self._tty_handoff = tty_handoff
+        self._g1_controller = None
 
     @property
     def name(self) -> str:
@@ -53,7 +59,9 @@ class EmbodiedTool(Tool):
             "For teleoperate/record, specify follower_names and leader_names "
             "(comma-separated aliases). 1+1 = single arm, 2+2 = bimanual. "
             "Use set_camera/remove_camera to configure cameras "
-            "(picks from scanned_cameras by index)."
+            "(picks from scanned_cameras by index). "
+            "For Unitree G1 Isaac Lab simulation, use g1_setup, g1_connect, g1_status, "
+            "g1_move_joint, and g1_go_named_pose."
         )
 
     @property
@@ -127,6 +135,28 @@ class EmbodiedTool(Tool):
                     "type": "string",
                     "description": "Comma-separated leader arm aliases (for teleoperate/record).",
                 },
+                "network_interface": {
+                    "type": "string",
+                    "description": "DDS network interface for Unitree G1 simulation.",
+                },
+                "dds_domain": {
+                    "type": "integer",
+                    "description": "DDS domain for Unitree G1 simulation.",
+                    "minimum": 0,
+                },
+                "joint_positions": {
+                    "type": "object",
+                    "description": "Joint position map for G1 move_joint. May also be passed as a JSON string.",
+                },
+                "pose_name": {
+                    "type": "string",
+                    "description": "Named G1 pose to execute: home, ready, or folded.",
+                },
+                "hold_seconds": {
+                    "type": "number",
+                    "description": "How long to keep publishing a G1 command.",
+                    "minimum": 0.02,
+                },
             },
             "required": ["action"],
         }
@@ -139,13 +169,21 @@ class EmbodiedTool(Tool):
         if action == "setup_show":
             return json.dumps(load_setup(), indent=2, ensure_ascii=False)
 
-        if action in ("set_arm", "remove_arm", "set_camera", "remove_camera"):
+        if action in ("set_arm", "remove_arm", "set_camera", "remove_camera", "g1_setup"):
             return self._handle_setup_action(action, kwargs)
 
         setup = ensure_setup()
 
         if action == "doctor":
             return await self._do_doctor(setup)
+        if action == "g1_connect":
+            return await self._do_g1_connect(setup)
+        if action == "g1_status":
+            return await self._do_g1_status(setup)
+        if action == "g1_move_joint":
+            return await self._do_g1_move_joint(setup, kwargs)
+        if action == "g1_go_named_pose":
+            return await self._do_g1_go_named_pose(setup, kwargs)
         if action == "identify":
             return await self._do_identify(setup)
         if action == "calibrate":
@@ -165,8 +203,10 @@ class EmbodiedTool(Tool):
 
     def _handle_setup_action(self, action: str, kwargs: dict) -> str:
         """Dispatch structured setup mutations. Returns user-facing message."""
-        from roboclaw.embodied.setup import remove_arm, remove_camera, set_arm, set_camera
+        from roboclaw.embodied.setup import clear_unitree_g1, remove_arm, remove_camera, set_arm, set_camera, set_unitree_g1
 
+        if action == "g1_setup":
+            return self._do_g1_setup(kwargs, set_unitree_g1, clear_unitree_g1)
         if action == "set_arm":
             return self._do_set_arm(kwargs, set_arm)
         if action == "remove_arm":
@@ -207,6 +247,34 @@ class EmbodiedTool(Tool):
         return f"Camera '{name}' configured.\n{json.dumps(updated['cameras'][name], indent=2)}"
 
     @staticmethod
+    def _do_g1_setup(kwargs: dict, set_fn: Any, clear_fn: Any) -> str:
+        network_interface = str(kwargs.get("network_interface", "")).strip()
+        if not network_interface:
+            return "g1_setup requires network_interface."
+        dds_domain = kwargs.get("dds_domain", 1)
+        if isinstance(dds_domain, str):
+            try:
+                dds_domain = int(dds_domain)
+            except ValueError:
+                return "g1_setup requires dds_domain to be an integer."
+        if dds_domain is None:
+            dds_domain = 1
+        try:
+            updated = set_fn(
+                network_interface=network_interface,
+                dds_domain=dds_domain,
+                enabled=True,
+                connected=False,
+                mode="sim",
+                robot_variant="g129_dex1",
+                motion_source="lowcmd",
+                sim_runtime="isaaclab",
+            )
+        except ValueError as exc:
+            return str(exc)
+        return f"Unitree G1 simulation configured.\n{json.dumps(updated['unitree_g1'], indent=2)}"
+
+    @staticmethod
     def _do_remove_camera(kwargs: dict, fn: Any) -> str:
         name = kwargs.get("camera_name", "")
         if not name:
@@ -234,6 +302,66 @@ class EmbodiedTool(Tool):
         if rc == 0:
             return "Arm identification complete. Use setup_show to see results."
         return f"Arm identification failed (exit {rc})."
+
+    def _get_g1_controller(self) -> Any:
+        if self._g1_controller is None:
+            from roboclaw.embodied.embodiment.g1 import UnitreeG1Controller
+
+            self._g1_controller = UnitreeG1Controller()
+        return self._g1_controller
+
+    async def _do_g1_connect(self, setup: dict) -> str:
+        from roboclaw.embodied.setup import set_unitree_g1
+
+        config = dict(setup.get("unitree_g1", {}))
+        if not config.get("enabled"):
+            return "Unitree G1 is not configured. Use g1_setup first."
+        try:
+            result = await self._get_g1_controller().connect(config)
+            set_unitree_g1(connected=True)
+        except Exception as exc:
+            return f"G1 connect failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_status(self, setup: dict) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        result = await self._get_g1_controller().status(config)
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_move_joint(self, setup: dict, kwargs: dict) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        joint_positions = kwargs.get("joint_positions")
+        if isinstance(joint_positions, str):
+            try:
+                joint_positions = json.loads(joint_positions)
+            except json.JSONDecodeError as exc:
+                return f"joint_positions must be valid JSON: {exc}"
+        if not isinstance(joint_positions, dict) or not joint_positions:
+            return "g1_move_joint requires joint_positions as a non-empty object."
+        try:
+            result = await self._get_g1_controller().move_joint(
+                config,
+                joint_positions,
+                hold_seconds=kwargs.get("hold_seconds", 2.0),
+            )
+        except Exception as exc:
+            return f"G1 move_joint failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_go_named_pose(self, setup: dict, kwargs: dict) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        pose_name = str(kwargs.get("pose_name") or "").strip()
+        if not pose_name:
+            return "g1_go_named_pose requires pose_name."
+        try:
+            result = await self._get_g1_controller().go_named_pose(
+                config,
+                pose_name,
+                hold_seconds=kwargs.get("hold_seconds", 4.0),
+            )
+        except Exception as exc:
+            return f"G1 go_named_pose failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
 
     async def _do_calibrate(self, setup: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller

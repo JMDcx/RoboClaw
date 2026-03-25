@@ -43,6 +43,7 @@ def test_tool_schema() -> None:
         "doctor", "identify", "calibrate", "teleoperate", "record",
         "train", "run_policy", "job_status",
         "setup_show", "set_arm", "remove_arm", "set_camera", "remove_camera",
+        "g1_setup", "g1_connect", "g1_status", "g1_move_joint", "g1_go_named_pose",
     ]
     assert action_schema["enum"] == expected_actions
 

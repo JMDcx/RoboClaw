@@ -13,7 +13,26 @@ SETUP_PATH = Path("~/.roboclaw/workspace/embodied/setup.json").expanduser()
 _ARM_TYPES = ("so101_follower", "so101_leader")
 _ARM_FIELDS = {"alias", "type", "port", "calibration_dir", "calibrated"}
 _CAMERA_FIELDS = {"by_path", "by_id", "dev", "width", "height"}
-_VALID_TOP_KEYS = {"version", "arms", "cameras", "datasets", "policies", "scanned_ports", "scanned_cameras"}
+_UNITREE_G1_FIELDS = {
+    "enabled",
+    "connected",
+    "mode",
+    "network_interface",
+    "dds_domain",
+    "robot_variant",
+    "motion_source",
+    "sim_runtime",
+}
+_VALID_TOP_KEYS = {
+    "version",
+    "arms",
+    "cameras",
+    "datasets",
+    "policies",
+    "scanned_ports",
+    "scanned_cameras",
+    "unitree_g1",
+}
 
 _CALIBRATION_ROOT = Path("~/.roboclaw/workspace/embodied/calibration").expanduser()
 
@@ -29,6 +48,16 @@ _DEFAULT_SETUP: dict[str, Any] = {
     },
     "scanned_ports": [],
     "scanned_cameras": [],
+    "unitree_g1": {
+        "enabled": False,
+        "connected": False,
+        "mode": "sim",
+        "network_interface": "",
+        "dds_domain": 1,
+        "robot_variant": "g129_dex1",
+        "motion_source": "lowcmd",
+        "sim_runtime": "isaaclab",
+    },
 }
 
 
@@ -36,7 +65,7 @@ def load_setup(path: Path = SETUP_PATH) -> dict[str, Any]:
     """Load setup.json, return defaults if not found."""
     if not path.exists():
         return copy.deepcopy(_DEFAULT_SETUP)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _merge_defaults(json.loads(path.read_text(encoding="utf-8")))
 
 
 def save_setup(setup: dict[str, Any], path: Path = SETUP_PATH) -> None:
@@ -65,6 +94,56 @@ def ensure_setup(path: Path = SETUP_PATH) -> dict[str, Any]:
     save_setup(defaults, path)
     return defaults
 
+
+
+def set_unitree_g1(
+    *,
+    network_interface: str | None = None,
+    dds_domain: int | None = None,
+    enabled: bool | None = None,
+    connected: bool | None = None,
+    mode: str | None = None,
+    robot_variant: str | None = None,
+    motion_source: str | None = None,
+    sim_runtime: str | None = None,
+    path: Path = SETUP_PATH,
+) -> dict[str, Any]:
+    """Create or update the Unitree G1 config block."""
+    setup = load_setup(path)
+    current = dict(setup.get("unitree_g1", {}))
+    merged = dict(_DEFAULT_SETUP["unitree_g1"])
+    merged.update(current)
+    if network_interface is not None:
+        merged["network_interface"] = network_interface
+    if dds_domain is not None:
+        merged["dds_domain"] = dds_domain
+    if enabled is not None:
+        merged["enabled"] = enabled
+    if connected is not None:
+        merged["connected"] = connected
+    if mode is not None:
+        merged["mode"] = mode
+    if robot_variant is not None:
+        merged["robot_variant"] = robot_variant
+    if motion_source is not None:
+        merged["motion_source"] = motion_source
+    if sim_runtime is not None:
+        merged["sim_runtime"] = sim_runtime
+
+    if not merged.get("network_interface"):
+        raise ValueError("Unitree G1 network_interface is required.")
+
+    setup["unitree_g1"] = merged
+    save_setup(setup, path)
+    return setup
+
+
+def clear_unitree_g1(path: Path = SETUP_PATH) -> dict[str, Any]:
+    """Disable Unitree G1 config and reset it to defaults."""
+    setup = load_setup(path)
+    setup["unitree_g1"] = copy.deepcopy(_DEFAULT_SETUP["unitree_g1"])
+    save_setup(setup, path)
+    return setup
 
 
 def mark_arm_calibrated(alias: str, path: Path = SETUP_PATH) -> dict[str, Any]:
@@ -207,6 +286,7 @@ def _validate_setup(setup: dict[str, Any]) -> None:
         raise ValueError(f"Unknown top-level keys: {invalid_top}")
     _validate_arms(setup.get("arms", []))
     _validate_cameras(setup.get("cameras", {}))
+    _validate_unitree_g1(setup.get("unitree_g1", {}))
 
 
 def _validate_arms(arms: Any) -> None:
@@ -237,3 +317,42 @@ def _validate_cameras(cameras: Any) -> None:
             raise ValueError(f"Camera '{name}' has unknown fields: {bad_fields}")
 
 
+
+
+def _validate_unitree_g1(config: Any) -> None:
+    """Validate Unitree G1 config block."""
+    if not isinstance(config, dict):
+        raise ValueError("'unitree_g1' must be a dict.")
+    bad_fields = set(config.keys()) - _UNITREE_G1_FIELDS
+    if bad_fields:
+        raise ValueError(f"Unitree G1 config has unknown fields: {bad_fields}")
+
+    mode = config.get("mode", "sim")
+    if mode != "sim":
+        raise ValueError("Unitree G1 mode must be 'sim'.")
+
+    robot_variant = config.get("robot_variant", "g129_dex1")
+    if robot_variant != "g129_dex1":
+        raise ValueError("Unitree G1 robot_variant must be 'g129_dex1'.")
+
+    motion_source = config.get("motion_source", "lowcmd")
+    if motion_source != "lowcmd":
+        raise ValueError("Unitree G1 motion_source must be 'lowcmd'.")
+
+    domain = config.get("dds_domain", 1)
+    if not isinstance(domain, int) or domain < 0:
+        raise ValueError("Unitree G1 dds_domain must be an integer >= 0.")
+
+    if config.get("enabled") and not str(config.get("network_interface", "")).strip():
+        raise ValueError("Enabled Unitree G1 config requires network_interface.")
+
+
+def _merge_defaults(setup: dict[str, Any]) -> dict[str, Any]:
+    """Merge missing top-level/nested defaults into a loaded setup."""
+    merged = copy.deepcopy(_DEFAULT_SETUP)
+    for key, value in setup.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key].update(value)
+        else:
+            merged[key] = value
+    return merged

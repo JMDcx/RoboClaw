@@ -5,6 +5,11 @@ x-common-config: &common-config
   volumes:
     - ~/.roboclaw:/root/.roboclaw
 
+x-g1-common-config: &g1-common-config
+  <<: *common-config
+  network_mode: host
+  entrypoint: ["/bin/bash", "-lc"]
+
 services:
   roboclaw-gateway:
     container_name: roboclaw-gateway
@@ -21,7 +26,7 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-  
+
   roboclaw-cli:
     <<: *common-config
     profiles:
@@ -29,3 +34,28 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+
+  roboclaw-g1-cli:
+    <<: *g1-common-config
+    profiles:
+      - g1
+    command: ['. /root/.roboclaw/g1/env.sh && roboclaw status']
+    stdin_open: true
+    tty: true
+
+  roboclaw-g1-agent:
+    container_name: roboclaw-g1-agent
+    <<: *g1-common-config
+    profiles:
+      - g1
+    command: ['. /root/.roboclaw/g1/env.sh && roboclaw agent']
+    stdin_open: true
+    tty: true
+
+  roboclaw-g1-gateway:
+    container_name: roboclaw-g1-gateway
+    <<: *g1-common-config
+    profiles:
+      - g1
+    command: ['. /root/.roboclaw/g1/env.sh && roboclaw gateway']
+    restart: unless-stopped
