@@ -71,7 +71,7 @@ _MOCK_SETUP = {
         "mode": "sim",
         "network_interface": "",
         "dds_domain": 1,
-        "robot_variant": "g129_dex1",
+        "robot_variant": "g129_inspire",
         "motion_source": "lowcmd",
         "sim_runtime": "isaaclab",
     },
@@ -108,7 +108,10 @@ def test_tool_schema() -> None:
     assert params["properties"]["joint_positions"]["type"] == "object"
     assert params["properties"]["pose_name"]["type"] == "string"
     assert params["properties"]["hold_seconds"]["type"] == "number"
-
+    assert params["properties"]["robot_variant"]["type"] == "string"
+    assert params["properties"]["side"]["type"] == "string"
+    assert params["properties"]["hand_positions"]["type"] == "object"
+    assert params["properties"]["preset_name"]["type"] == "string"
     assert params["properties"]["action"]["enum"] == [
         "doctor",
         "identify",
@@ -131,6 +134,9 @@ def test_tool_schema() -> None:
         "g1_status",
         "g1_move_joint",
         "g1_go_named_pose",
+        "g1_hand_status",
+        "g1_hand_move",
+        "g1_hand_preset",
     ]
 
 
@@ -140,6 +146,38 @@ async def test_describe_action() -> None:
     result = await tool.execute(action="describe", target_action="record")
     assert "record" in result
     assert "dataset" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_g1_hand_actions_parse_json() -> None:
+    tool = EmbodiedTool()
+    tool._g1_controller = type(
+        "FakeController",
+        (),
+        {
+            "hand_move": AsyncMock(return_value={"ok": True, "positions": {"left_index": 0.2}}),
+            "hand_preset": AsyncMock(return_value={"ok": True, "preset_name": "grasp"}),
+            "hand_status": AsyncMock(return_value={"ok": True, "received_handstate": False}),
+        },
+    )()
+    setup = {
+        **_MOCK_SETUP,
+        "unitree_g1": {
+            **_MOCK_SETUP["unitree_g1"],
+            "enabled": True,
+            "robot_variant": "g129_inspire",
+            "network_interface": "wlp68s0",
+        },
+    }
+
+    with patch("roboclaw.embodied.setup.ensure_setup", return_value=setup):
+        move_result = await tool.execute(action="g1_hand_move", side="left", hand_positions='{"index": 0.2}')
+        preset_result = await tool.execute(action="g1_hand_preset", preset_name="grasp")
+        status_result = await tool.execute(action="g1_hand_status")
+
+    assert "left_index" in move_result
+    assert "grasp" in preset_result
+    assert "received_handstate" in status_result
 
 
 @pytest.mark.asyncio

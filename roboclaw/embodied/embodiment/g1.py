@@ -8,7 +8,6 @@ import importlib.util
 import math
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 _DEFAULT_DDS_DOMAIN = 1
@@ -19,9 +18,13 @@ _DEFAULT_TAU = 0.0
 _DEFAULT_PUBLISH_HZ = 50.0
 _DEFAULT_MOVE_HOLD_S = 2.0
 _DEFAULT_NAMED_POSE_HOLD_S = 4.0
+_DEFAULT_HAND_HOLD_S = 0.5
 _LOWSTATE_TOPIC = "rt/lowstate"
 _LOWCMD_TOPIC = "rt/lowcmd"
+_INSPIRE_STATE_TOPIC = "rt/inspire/state"
+_INSPIRE_CMD_TOPIC = "rt/inspire/cmd"
 _K_NOT_USED_JOINT = 29
+_G1_VARIANTS = {"g129_dex1", "g129_inspire"}
 _G1_JOINTS = {
     "waist_yaw": 12,
     "waist_roll": 13,
@@ -72,6 +75,80 @@ _NAMED_POSES = {
         "waist_pitch": 0.0,
     },
 }
+_HAND_JOINT_ORDER = (
+    "right_pinky",
+    "right_ring",
+    "right_middle",
+    "right_index",
+    "right_thumb_bend",
+    "right_thumb_rotation",
+    "left_pinky",
+    "left_ring",
+    "left_middle",
+    "left_index",
+    "left_thumb_bend",
+    "left_thumb_rotation",
+)
+_HAND_JOINTS = {name: index for index, name in enumerate(_HAND_JOINT_ORDER)}
+_HAND_FINGER_ORDER = ("pinky", "ring", "middle", "index", "thumb_bend", "thumb_rotation")
+_HAND_SIDES = {"left", "right", "both"}
+_HAND_OPEN = {
+    "right_pinky": 0.05,
+    "right_ring": 0.05,
+    "right_middle": 0.05,
+    "right_index": 0.05,
+    "right_thumb_bend": 0.15,
+    "right_thumb_rotation": 0.35,
+    "left_pinky": 0.05,
+    "left_ring": 0.05,
+    "left_middle": 0.05,
+    "left_index": 0.05,
+    "left_thumb_bend": 0.15,
+    "left_thumb_rotation": 0.35,
+}
+_HAND_JOINT_LIMITS = {
+    "pinky": (0.0, 1.7),
+    "ring": (0.0, 1.7),
+    "middle": (0.0, 1.7),
+    "index": (0.0, 1.7),
+    "thumb_bend": (0.0, 0.5),
+    "thumb_rotation": (-0.1, 1.3),
+}
+_HAND_PRESETS = {
+    "open": {
+        "pinky": 0.05,
+        "ring": 0.05,
+        "middle": 0.05,
+        "index": 0.05,
+        "thumb_bend": 0.15,
+        "thumb_rotation": 0.35,
+    },
+    "grasp": {
+        "pinky": 1.0,
+        "ring": 1.0,
+        "middle": 1.0,
+        "index": 1.0,
+        "thumb_bend": 1.0,
+        "thumb_rotation": 1.0,
+    },
+    "pinch": {
+        "pinky": 0.8,
+        "ring": 0.8,
+        "middle": 0.8,
+        "index": 0.15,
+        "thumb_bend": 0.1,
+        "thumb_rotation": 0.15,
+    },
+    "tripod": {
+        "pinky": 0.8,
+        "ring": 0.8,
+        "middle": 0.2,
+        "index": 0.2,
+        "thumb_bend": 0.1,
+        "thumb_rotation": 0.2,
+    },
+    "relax": {finger: 0.6 for finger in _HAND_FINGER_ORDER},
+}
 
 
 class UnitreeG1Controller:
@@ -83,8 +160,13 @@ class UnitreeG1Controller:
         self._connected = False
         self._subscriber: Any | None = None
         self._publisher: Any | None = None
+        self._hand_subscriber: Any | None = None
+        self._hand_publisher: Any | None = None
         self._last_lowstate: Any | None = None
         self._last_lowstate_ts: float | None = None
+        self._last_hand_state: Any | None = None
+        self._last_hand_state_ts: float | None = None
+        self._last_hand_targets: dict[str, float] = dict(_HAND_OPEN)
         self._last_error: str | None = None
         self._lowstate_ready = threading.Event()
 
@@ -94,6 +176,8 @@ class UnitreeG1Controller:
             "cyclonedds_available": self._module_exists("cyclonedds"),
             "command_topic": _LOWCMD_TOPIC,
             "lowstate_topic": _LOWSTATE_TOPIC,
+            "inspire_command_topic": _INSPIRE_CMD_TOPIC,
+            "inspire_state_topic": _INSPIRE_STATE_TOPIC,
         }
 
     async def status(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +186,9 @@ class UnitreeG1Controller:
         details["connected"] = self._connected
         details["received_lowstate"] = self._received_lowstate
         details["joint_positions"] = self._current_joint_targets()
+        details["received_handstate"] = self._received_handstate
+        details["hand_positions"] = self._current_hand_targets()
+        details["hand_targets"] = dict(self._last_hand_targets)
         return details
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -128,6 +215,16 @@ class UnitreeG1Controller:
         if not self._supports_required_joint_indices():
             self._last_error = "LowState arrived but does not expose the expected G1 arm joint indices."
             raise RuntimeError(self._last_error)
+        if self._is_inspire_variant(config):
+            hand_msg_mod = self._import_hand_message_module()
+            self._hand_subscriber = self._make_hand_subscriber(channel_mod, hand_msg_mod)
+            self._hand_publisher = self._make_hand_publisher(channel_mod, hand_msg_mod)
+        else:
+            self._hand_subscriber = None
+            self._hand_publisher = None
+            self._last_hand_state = None
+            self._last_hand_state_ts = None
+            self._last_hand_targets = dict(_HAND_OPEN)
         self._connected = True
         return {
             "ok": True,
@@ -135,6 +232,9 @@ class UnitreeG1Controller:
             "network_interface": self._network_interface(config),
             "dds_domain": self._dds_domain(config),
             "joint_count": self._joint_count(),
+            "robot_variant": self._robot_variant(config),
+            "hand_command_topic": _INSPIRE_CMD_TOPIC if self._is_inspire_variant(config) else None,
+            "hand_state_topic": _INSPIRE_STATE_TOPIC if self._is_inspire_variant(config) else None,
         }
 
     async def move_joint(
@@ -152,7 +252,7 @@ class UnitreeG1Controller:
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Joint target values must be numeric: {exc}") from exc
         low_cmd = self._build_low_cmd(normalized)
-        writes = await self._publish_low_cmd(low_cmd, hold_seconds=hold_seconds)
+        writes = await self._publish_message(self._publisher, low_cmd, hold_seconds=hold_seconds)
         return {
             "ok": True,
             "positions": normalized,
@@ -176,9 +276,76 @@ class UnitreeG1Controller:
         result["named_pose"] = pose_key
         return result
 
+    async def hand_status(self, config: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_inspire_hand_supported(config)
+        return {
+            "ok": True,
+            "robot_variant": self._robot_variant(config),
+            "hand_command_topic": _INSPIRE_CMD_TOPIC,
+            "hand_state_topic": _INSPIRE_STATE_TOPIC,
+            "received_handstate": self._received_handstate,
+            "hand_positions": self._current_hand_targets(),
+            "hand_targets": dict(self._last_hand_targets),
+            "last_hand_state_timestamp": self._last_hand_state_ts,
+            "connected": self._connected,
+        }
+
+    async def hand_move(
+        self,
+        config: dict[str, Any],
+        positions: dict[str, Any],
+        *,
+        side: str = "both",
+        hold_seconds: float = _DEFAULT_HAND_HOLD_S,
+    ) -> dict[str, Any]:
+        self._ensure_inspire_hand_supported(config)
+        normalized_side = self._coerce_hand_side(side)
+        expanded = self._expand_hand_positions(positions, normalized_side)
+        targets = dict(self._last_hand_targets or _HAND_OPEN)
+        targets.update(expanded)
+        hand_cmd = self._build_hand_cmd(targets)
+        writes = await self._publish_message(self._hand_publisher, hand_cmd, hold_seconds=hold_seconds)
+        self._last_hand_targets = targets
+        return {
+            "ok": True,
+            "side": normalized_side,
+            "positions": dict(targets),
+            "applied_positions": dict(expanded),
+            "hold_seconds": self._coerce_hold_seconds(hold_seconds, _DEFAULT_HAND_HOLD_S),
+            "write_count": writes,
+            "command_topic": _INSPIRE_CMD_TOPIC,
+            "state_topic": _INSPIRE_STATE_TOPIC,
+        }
+
+    async def hand_preset(
+        self,
+        config: dict[str, Any],
+        preset_name: str,
+        *,
+        side: str = "both",
+        hold_seconds: float = _DEFAULT_HAND_HOLD_S,
+    ) -> dict[str, Any]:
+        preset_key = str(preset_name or "").strip().lower()
+        if preset_key not in _HAND_PRESETS:
+            raise ValueError(
+                f"Unknown G1 hand preset '{preset_name}'. Available: {', '.join(sorted(_HAND_PRESETS))}."
+            )
+        result = await self.hand_move(
+            config,
+            dict(_HAND_PRESETS[preset_key]),
+            side=side,
+            hold_seconds=hold_seconds,
+        )
+        result["preset_name"] = preset_key
+        return result
+
     @property
     def _received_lowstate(self) -> bool:
         return self._last_lowstate is not None
+
+    @property
+    def _received_handstate(self) -> bool:
+        return self._last_hand_state is not None
 
     def _validate_config(self, config: dict[str, Any]) -> None:
         network_interface = self._network_interface(config)
@@ -186,8 +353,9 @@ class UnitreeG1Controller:
             raise ValueError("Unitree G1 network_interface is required.")
         if str(config.get("mode") or "sim") != "sim":
             raise ValueError("Unitree G1 controller currently supports only sim mode.")
-        if str(config.get("robot_variant") or "g129_dex1") != "g129_dex1":
-            raise ValueError("Unitree G1 sim requires robot_variant 'g129_dex1'.")
+        robot_variant = self._robot_variant(config)
+        if robot_variant not in _G1_VARIANTS:
+            raise ValueError(f"Unitree G1 sim requires robot_variant in {sorted(_G1_VARIANTS)}.")
         if str(config.get("motion_source") or "lowcmd") != "lowcmd":
             raise ValueError("Unitree G1 sim requires motion_source 'lowcmd'.")
         domain = self._dds_domain(config)
@@ -198,12 +366,25 @@ class UnitreeG1Controller:
         if not self._connected or self._publisher is None:
             raise RuntimeError("Unitree G1 controller is not connected.")
 
+    def _ensure_inspire_hand_supported(self, config: dict[str, Any]) -> None:
+        self._ensure_connected()
+        if not self._is_inspire_variant(config):
+            raise ValueError("Unitree G1 hand control requires robot_variant 'g129_inspire'.")
+        if self._hand_publisher is None:
+            raise RuntimeError("Unitree G1 Inspire hand publisher is unavailable.")
+
     def _network_interface(self, config: dict[str, Any]) -> str:
         return str(config.get("network_interface") or "").strip()
 
     def _dds_domain(self, config: dict[str, Any]) -> int:
         value = config.get("dds_domain")
         return _DEFAULT_DDS_DOMAIN if value is None else int(value)
+
+    def _robot_variant(self, config: dict[str, Any]) -> str:
+        return str(config.get("robot_variant") or "g129_dex1")
+
+    def _is_inspire_variant(self, config: dict[str, Any]) -> bool:
+        return self._robot_variant(config) == "g129_inspire"
 
     def _module_exists(self, name: str) -> bool:
         try:
@@ -223,6 +404,15 @@ class UnitreeG1Controller:
             "LowCmd": getattr(low_types, "LowCmd_", None),
         }
 
+    def _import_hand_message_module(self) -> dict[str, Any]:
+        default_mod = importlib.import_module("unitree_sdk2py.idl.default")
+        go_types = importlib.import_module("unitree_sdk2py.idl.unitree_go.msg.dds_")
+        return {
+            "MotorCmdDefault": getattr(default_mod, "unitree_go_msg_dds__MotorCmd_", None),
+            "MotorCmds": getattr(go_types, "MotorCmds_", None),
+            "MotorStates": getattr(go_types, "MotorStates_", None),
+        }
+
     def _initialize_channel_factory(self, factory: Any, *, domain: int, network_interface: str) -> None:
         try:
             factory(domain, network_interface)
@@ -239,10 +429,24 @@ class UnitreeG1Controller:
         publisher.Init()
         return publisher
 
+    def _make_hand_subscriber(self, channel_mod: Any, msg_mod: dict[str, Any]) -> Any:
+        subscriber = channel_mod.ChannelSubscriber(_INSPIRE_STATE_TOPIC, msg_mod["MotorStates"])
+        subscriber.Init(self._hand_state_handler, 10)
+        return subscriber
+
+    def _make_hand_publisher(self, channel_mod: Any, msg_mod: dict[str, Any]) -> Any:
+        publisher = channel_mod.ChannelPublisher(_INSPIRE_CMD_TOPIC, msg_mod["MotorCmds"])
+        publisher.Init()
+        return publisher
+
     def _lowstate_handler(self, msg: Any) -> None:
         self._last_lowstate = msg
         self._last_lowstate_ts = time.time()
         self._lowstate_ready.set()
+
+    def _hand_state_handler(self, msg: Any) -> None:
+        self._last_hand_state = msg
+        self._last_hand_state_ts = time.time()
 
     def _joint_count(self) -> int | None:
         state = self._last_lowstate
@@ -258,10 +462,11 @@ class UnitreeG1Controller:
         return joint_count is not None and joint_count > max(_REQUIRED_JOINT_INDICES)
 
     def _lowstate_timeout_message(self, config: dict[str, Any]) -> str:
+        variant_hint = "Inspire" if self._is_inspire_variant(config) else "Dex1"
         return (
             f"Timed out waiting for the first G1 lowstate frame on interface '{self._network_interface(config)}' "
             f"(domain={self._dds_domain(config)}). For sim mode, verify unitree_sim_isaaclab is already running, "
-            "Dex1 DDS is enabled, and the DDS domain/interface match RoboClaw."
+            f"{variant_hint} DDS is enabled, and the DDS domain/interface match RoboClaw."
         )
 
     def _current_joint_targets(self) -> dict[str, float]:
@@ -272,6 +477,18 @@ class UnitreeG1Controller:
             for name, index in _G1_JOINTS.items()
             if index < len(motor_state)
         }
+
+    def _current_hand_targets(self) -> dict[str, float]:
+        state = self._last_hand_state
+        hand_state = getattr(state, "states", []) if state is not None else []
+        if not hand_state:
+            return {}
+        positions: dict[str, float] = {}
+        for name, index in _HAND_JOINTS.items():
+            if index >= len(hand_state):
+                continue
+            positions[name] = self._normalize_hand_q(name, float(getattr(hand_state[index], "q", 0.0)))
+        return positions
 
     def _build_low_cmd(self, targets: dict[str, float]) -> Any:
         msg_mod = self._import_message_module()
@@ -299,6 +516,27 @@ class UnitreeG1Controller:
             low_cmd.crc = crc
         return low_cmd
 
+    def _build_hand_cmd(self, targets: dict[str, float]) -> Any:
+        msg_mod = self._import_hand_message_module()
+        cmds_type = msg_mod.get("MotorCmds")
+        cmd_type = msg_mod.get("MotorCmdDefault")
+        if cmds_type is None or cmd_type is None:
+            raise RuntimeError("Unitree SDK2 hand message module does not expose Inspire command constructors.")
+        hand_cmd = cmds_type()
+        hand_cmd.cmds = [cmd_type() for _ in range(len(_HAND_JOINT_ORDER))]
+        for name, index in _HAND_JOINTS.items():
+            command = hand_cmd.cmds[index]
+            command.q = self._denormalize_hand_q(name, targets[name])
+            if hasattr(command, "dq"):
+                command.dq = 0.0
+            if hasattr(command, "tau"):
+                command.tau = 0.0
+            if hasattr(command, "kp"):
+                command.kp = 0.0
+            if hasattr(command, "kd"):
+                command.kd = 0.0
+        return hand_cmd
+
     def _compute_crc(self, low_cmd: Any) -> int | None:
         try:
             crc_mod = importlib.import_module("unitree_sdk2py.utils.crc")
@@ -312,22 +550,23 @@ class UnitreeG1Controller:
         except Exception:
             return None
 
-    async def _publish_low_cmd(
+    async def _publish_message(
         self,
-        low_cmd: Any,
+        publisher: Any,
+        message: Any,
         *,
         hold_seconds: float,
         publish_hz: float = _DEFAULT_PUBLISH_HZ,
     ) -> int:
-        if self._publisher is None or not hasattr(self._publisher, "Write"):
-            raise RuntimeError("Unitree G1 lowcmd publisher is unavailable.")
+        if publisher is None or not hasattr(publisher, "Write"):
+            raise RuntimeError("Unitree publisher is unavailable.")
         duration = max(0.02, float(hold_seconds))
         hz = max(1.0, float(publish_hz))
         interval = 1.0 / hz
         repeats = max(1, int(round(duration * hz)))
         count = 0
         for _ in range(repeats):
-            self._publisher.Write(low_cmd)
+            publisher.Write(message)
             count += 1
             await asyncio.sleep(interval)
         return count
@@ -341,12 +580,61 @@ class UnitreeG1Controller:
             return default
         return max(0.02, hold_seconds)
 
+    def _coerce_hand_side(self, side: Any) -> str:
+        normalized = str(side or "both").strip().lower()
+        if normalized not in _HAND_SIDES:
+            raise ValueError(f"Unknown G1 hand side '{side}'. Available: {', '.join(sorted(_HAND_SIDES))}.")
+        return normalized
+
+    def _expand_hand_positions(self, positions: dict[str, Any], side: str) -> dict[str, float]:
+        if not isinstance(positions, dict) or not positions:
+            raise ValueError("G1 hand positions must be a non-empty object.")
+        expanded: dict[str, float] = {}
+        for key, raw_value in positions.items():
+            names = self._resolve_hand_position_keys(str(key), side)
+            try:
+                value = float(raw_value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"G1 hand target '{key}' must be numeric: {exc}") from exc
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"G1 hand target '{key}' must be within [0, 1].")
+            for name in names:
+                expanded[name] = value
+        return expanded
+
+    def _resolve_hand_position_keys(self, key: str, side: str) -> list[str]:
+        normalized = key.strip().lower()
+        if normalized in _HAND_JOINTS:
+            return [normalized]
+        if normalized not in _HAND_FINGER_ORDER:
+            raise ValueError(f"Unknown G1 hand joint '{key}'.")
+        if side == "both":
+            return [f"left_{normalized}", f"right_{normalized}"]
+        return [f"{side}_{normalized}"]
+
+    def _denormalize_hand_q(self, joint_name: str, value: float) -> float:
+        low, high = _HAND_JOINT_LIMITS[self._hand_joint_kind(joint_name)]
+        return high - value * (high - low)
+
+    def _normalize_hand_q(self, joint_name: str, q_value: float) -> float:
+        low, high = _HAND_JOINT_LIMITS[self._hand_joint_kind(joint_name)]
+        if high == low:
+            return 0.0
+        normalized = (high - q_value) / (high - low)
+        return max(0.0, min(1.0, normalized))
+
+    def _hand_joint_kind(self, joint_name: str) -> str:
+        _, _, kind = joint_name.partition("_")
+        if kind.startswith("thumb_"):
+            return kind
+        return kind
+
     def _debug_details(self, config: dict[str, Any]) -> dict[str, Any]:
         return {
             "network_interface": self._network_interface(config),
             "dds_domain": self._dds_domain(config),
             "mode": str(config.get("mode") or "sim"),
-            "robot_variant": str(config.get("robot_variant") or "g129_dex1"),
+            "robot_variant": self._robot_variant(config),
             "motion_source": str(config.get("motion_source") or "lowcmd"),
             "sim_runtime": str(config.get("sim_runtime") or "isaaclab"),
             "command_topic": _LOWCMD_TOPIC,
@@ -356,4 +644,8 @@ class UnitreeG1Controller:
             "channel_initialized": self._channel_initialized,
             "connected": self._connected,
             "last_error": self._last_error,
+            "hand_command_topic": _INSPIRE_CMD_TOPIC if self._is_inspire_variant(config) else None,
+            "hand_state_topic": _INSPIRE_STATE_TOPIC if self._is_inspire_variant(config) else None,
+            "received_handstate": self._received_handstate,
+            "last_hand_state_timestamp": self._last_hand_state_ts,
         }

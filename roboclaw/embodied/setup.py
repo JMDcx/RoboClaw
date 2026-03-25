@@ -23,6 +23,7 @@ _UNITREE_G1_FIELDS = {
     "motion_source",
     "sim_runtime",
 }
+_UNITREE_G1_VARIANTS = ("g129_dex1", "g129_inspire")
 _VALID_TOP_KEYS = {
     "version",
     "arms",
@@ -354,8 +355,8 @@ def _validate_unitree_g1(config: Any) -> None:
         raise ValueError("Unitree G1 mode must be 'sim'.")
 
     robot_variant = config.get("robot_variant", "g129_dex1")
-    if robot_variant != "g129_dex1":
-        raise ValueError("Unitree G1 robot_variant must be 'g129_dex1'.")
+    if robot_variant not in _UNITREE_G1_VARIANTS:
+        raise ValueError(f"Unitree G1 robot_variant must be one of {_UNITREE_G1_VARIANTS}.")
 
     motion_source = config.get("motion_source", "lowcmd")
     if motion_source != "lowcmd":

@@ -35,6 +35,9 @@ _ACTIONS = [
     "g1_status",
     "g1_move_joint",
     "g1_go_named_pose",
+    "g1_hand_status",
+    "g1_hand_move",
+    "g1_hand_preset",
 ]
 
 _ACTION_DESCRIPTIONS = {
@@ -54,6 +57,9 @@ _ACTION_DESCRIPTIONS = {
     "remove_arm": "Remove one configured arm alias.",
     "set_camera": "Assign a scanned camera to a stable camera name.",
     "remove_camera": "Remove a configured camera.",
+    "g1_hand_status": "Inspect the latest Inspire hand DDS state and command targets for Unitree G1.",
+    "g1_hand_move": "Send normalized Inspire hand joint targets for Unitree G1 simulation.",
+    "g1_hand_preset": "Execute a named Inspire hand preset such as open or grasp.",
 }
 
 _LOGS_DIR = Path("~/.roboclaw/workspace/embodied/jobs").expanduser()
@@ -86,10 +92,10 @@ class EmbodiedTool(Tool):
             "Use set_camera/remove_camera to configure cameras (picks from scanned_cameras by index). "
             "For teleoperate/record, specify follower_names and leader_names (comma-separated aliases). "
             "1+1 = single arm, 2+2 = bimanual. "
-            "For Unitree G1 Isaac Lab simulation, use g1_setup, g1_connect, g1_status, g1_move_joint, and g1_go_named_pose. "
+            "For Unitree G1 Isaac Lab simulation, use g1_setup, g1_connect, g1_status, g1_move_joint, g1_go_named_pose, g1_hand_status, g1_hand_move, and g1_hand_preset. "
             "Actions: setup_show, identify, describe, calibrate, teleoperate, record, replay, train, run_policy, "
             "job_status, set_arm, rename_arm, remove_arm, set_camera, remove_camera, g1_setup, g1_connect, "
-            "g1_status, g1_move_joint, g1_go_named_pose."
+            "g1_status, g1_move_joint, g1_go_named_pose, g1_hand_status, g1_hand_move, g1_hand_preset."
         )
 
     @property
@@ -198,6 +204,24 @@ class EmbodiedTool(Tool):
                     "description": "How long to keep publishing a G1 command.",
                     "minimum": 0.02,
                 },
+                "robot_variant": {
+                    "type": "string",
+                    "enum": ["g129_dex1", "g129_inspire"],
+                    "description": "Unitree G1 sim variant for g1_setup.",
+                },
+                "side": {
+                    "type": "string",
+                    "enum": ["left", "right", "both"],
+                    "description": "Which Inspire hand side to command.",
+                },
+                "hand_positions": {
+                    "type": "object",
+                    "description": "Normalized Inspire hand position map for G1 hand control. May also be passed as a JSON string.",
+                },
+                "preset_name": {
+                    "type": "string",
+                    "description": "Named G1 hand preset to execute: open, grasp, pinch, tripod, or relax.",
+                },
             },
             "required": ["action"],
         }
@@ -229,6 +253,12 @@ class EmbodiedTool(Tool):
                 return await self._do_g1_move_joint(setup, kwargs)
             if action == "g1_go_named_pose":
                 return await self._do_g1_go_named_pose(setup, kwargs)
+            if action == "g1_hand_status":
+                return await self._do_g1_hand_status(setup)
+            if action == "g1_hand_move":
+                return await self._do_g1_hand_move(setup, kwargs)
+            if action == "g1_hand_preset":
+                return await self._do_g1_hand_preset(setup, kwargs)
             if action == "identify":
                 return await self._do_identify(setup)
             if action == "calibrate":
@@ -336,6 +366,7 @@ class EmbodiedTool(Tool):
                 return "g1_setup requires dds_domain to be an integer."
         if dds_domain is None:
             dds_domain = 1
+        robot_variant = str(kwargs.get("robot_variant") or "g129_dex1").strip() or "g129_dex1"
         try:
             updated = set_fn(
                 network_interface=network_interface,
@@ -343,7 +374,7 @@ class EmbodiedTool(Tool):
                 enabled=True,
                 connected=False,
                 mode="sim",
-                robot_variant="g129_dex1",
+                robot_variant=robot_variant,
                 motion_source="lowcmd",
                 sim_runtime="isaaclab",
             )
@@ -438,6 +469,51 @@ class EmbodiedTool(Tool):
             )
         except Exception as exc:
             return f"G1 go_named_pose failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_hand_status(self, setup: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        try:
+            result = await self._get_g1_controller().hand_status(config)
+        except Exception as exc:
+            return f"G1 hand_status failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_hand_move(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        hand_positions = kwargs.get("hand_positions")
+        if isinstance(hand_positions, str):
+            try:
+                hand_positions = json.loads(hand_positions)
+            except json.JSONDecodeError as exc:
+                return f"hand_positions must be valid JSON: {exc}"
+        if not isinstance(hand_positions, dict) or not hand_positions:
+            return "g1_hand_move requires hand_positions as a non-empty object."
+        try:
+            result = await self._get_g1_controller().hand_move(
+                config,
+                hand_positions,
+                side=kwargs.get("side", "both"),
+                hold_seconds=kwargs.get("hold_seconds", 0.5),
+            )
+        except Exception as exc:
+            return f"G1 hand_move failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_hand_preset(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        preset_name = str(kwargs.get("preset_name") or "").strip()
+        if not preset_name:
+            return "g1_hand_preset requires preset_name."
+        try:
+            result = await self._get_g1_controller().hand_preset(
+                config,
+                preset_name,
+                side=kwargs.get("side", "both"),
+                hold_seconds=kwargs.get("hold_seconds", 0.5),
+            )
+        except Exception as exc:
+            return f"G1 hand_preset failed: {exc}"
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     async def _do_calibrate(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
