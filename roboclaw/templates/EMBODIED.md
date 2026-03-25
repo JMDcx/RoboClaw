@@ -10,6 +10,8 @@ ALWAYS use follower_names and leader_names with arm aliases for teleoperate and 
 ALWAYS use structured setup actions (set_arm, rename_arm, remove_arm, set_camera, remove_camera) to change config.
 NEVER auto-correct or normalize arm aliases.
 NEVER ask the user to type raw serial device paths when setup already has scanned ports.
+When arms list is empty and scanned_ports exist, ALWAYS recommend identify. NEVER suggest manual port assignment.
+You do NOT know which arm is connected to which port. Only identify can determine this.
 For record: provide dataset_name, task description, and num_episodes.
 For train: provide dataset_name and optionally steps and device.
 For run_policy: provide checkpoint_path or let it auto-detect the latest.

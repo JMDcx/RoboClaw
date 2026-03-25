@@ -38,6 +38,7 @@ def test_tool_schema() -> None:
     tool = EmbodiedTool()
     assert tool.name == "embodied"
     assert "robot" in tool.description.lower()
+    assert "calibrate" in tool.parameters["properties"]["name"]["description"]
 
     params = tool.parameters
     assert params["type"] == "object"
@@ -106,6 +107,7 @@ async def test_calibrate_all_arms() -> None:
     mock_runner.run_interactive.return_value = 0
 
     with (
+        patch("builtins.print") as mock_print,
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.setup.mark_arm_calibrated"),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
@@ -118,6 +120,8 @@ async def test_calibrate_all_arms() -> None:
     assert "left_leader" in result
     assert mock_runner.run_interactive.call_count == 2
     assert mock_handoff.call_count == 4  # start+stop for each arm
+    assert mock_print.call_args_list[0].args == ("\n=== Calibrating: right_follower ===",)
+    assert mock_print.call_args_list[1].args == ("\n=== Calibrating: left_leader ===",)
     follower_argv = mock_runner.run_interactive.call_args_list[0].args[0]
     leader_argv = mock_runner.run_interactive.call_args_list[1].args[0]
     assert "--robot.id=f" in follower_argv
@@ -130,7 +134,7 @@ async def test_calibrate_no_arms() -> None:
     tool = EmbodiedTool()
     with patch("roboclaw.embodied.setup.ensure_setup", return_value=empty_setup):
         result = await tool.execute(action="calibrate")
-    assert "no arms" in result.lower()
+    assert result == "No arms configured."
 
 
 @pytest.mark.asyncio
@@ -139,6 +143,62 @@ async def test_calibrate_no_tty() -> None:
     with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP):
         result = await tool.execute(action="calibrate")
     assert "local terminal" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_calibrate_named_arm_even_if_already_calibrated() -> None:
+    setup = {
+        **_MOCK_SETUP,
+        "arms": [
+            {**_MOCK_SETUP["arms"][0], "calibrated": True},
+            {**_MOCK_SETUP["arms"][1], "calibrated": False},
+        ],
+    }
+    tool = EmbodiedTool(tty_handoff=AsyncMock())
+    mock_runner = AsyncMock()
+    mock_runner.run_interactive.return_value = 0
+
+    with (
+        patch("builtins.print"),
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
+        patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
+        result = await tool.execute(action="calibrate", name="right_follower")
+
+    assert "1 succeeded, 0 failed." in result
+    assert mock_runner.run_interactive.call_count == 1
+    assert "--robot.port=/dev/ttyACM0" in mock_runner.run_interactive.call_args.args[0]
+    mock_mark.assert_called_once_with("right_follower")
+
+
+@pytest.mark.asyncio
+async def test_calibrate_named_arm_not_found() -> None:
+    tool = EmbodiedTool(tty_handoff=AsyncMock())
+
+    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP):
+        result = await tool.execute(action="calibrate", name="missing_arm")
+
+    assert result == "No arm named 'missing_arm' found in setup."
+
+
+@pytest.mark.asyncio
+async def test_calibrate_interrupted_on_sigint() -> None:
+    tool = EmbodiedTool(tty_handoff=AsyncMock())
+    mock_runner = AsyncMock()
+    mock_runner.run_interactive.side_effect = [0, 130]
+
+    with (
+        patch("builtins.print"),
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
+        result = await tool.execute(action="calibrate")
+
+    assert result == "interrupted"
+    assert mock_runner.run_interactive.call_count == 2
+    mock_mark.assert_called_once_with("right_follower")
 
 
 @pytest.mark.asyncio
@@ -178,6 +238,20 @@ async def test_train_action() -> None:
         result = await tool.execute(action="train", dataset_name="test", steps=5000)
 
     assert "job-abc-123" in result
+
+
+@pytest.mark.asyncio
+async def test_run_policy_no_follower_arm() -> None:
+    setup = {
+        **_MOCK_SETUP,
+        "arms": [{**_MOCK_SETUP["arms"][1]}],
+    }
+    tool = EmbodiedTool()
+
+    with patch("roboclaw.embodied.setup.ensure_setup", return_value=setup):
+        result = await tool.execute(action="run_policy")
+
+    assert result == "No follower arm configured."
 
 
 @pytest.mark.asyncio
@@ -460,8 +534,25 @@ def test_resolve_operation_arms_missing_arm() -> None:
 def test_resolve_operation_arms_empty_setup() -> None:
     empty = {**_MOCK_SETUP, "arms": []}
     result = _resolve_operation_arms(empty, "", "")
-    assert isinstance(result, str)
-    assert "no arms" in result.lower()
+    assert result == "No arms configured."
+
+
+def test_resolve_operation_arms_no_followers() -> None:
+    leaders_only = {
+        **_MOCK_SETUP,
+        "arms": [{**_MOCK_SETUP["arms"][1]}],
+    }
+    result = _resolve_operation_arms(leaders_only, "", "")
+    assert result == "No follower arms configured."
+
+
+def test_resolve_operation_arms_no_leaders() -> None:
+    followers_only = {
+        **_MOCK_SETUP,
+        "arms": [{**_MOCK_SETUP["arms"][0]}],
+    }
+    result = _resolve_operation_arms(followers_only, "", "")
+    assert result == "No leader arms configured."
 
 
 def test_resolve_operation_arms_count_mismatch() -> None:

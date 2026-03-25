@@ -102,7 +102,7 @@ class EmbodiedTool(Tool):
                 },
                 "name": {
                     "type": "string",
-                    "description": "Arm alias (for set_arm / rename_arm / remove_arm).",
+                    "description": "Arm alias (for calibrate / set_arm / rename_arm / remove_arm).",
                 },
                 "new_alias": {
                     "type": "string",
@@ -155,7 +155,7 @@ class EmbodiedTool(Tool):
         if action == "identify":
             return await self._do_identify(setup)
         if action == "calibrate":
-            return await self._do_calibrate(setup)
+            return await self._do_calibrate(setup, kwargs)
         if action == "teleoperate":
             return await self._do_teleoperate(setup, kwargs)
         if action == "record":
@@ -254,23 +254,26 @@ class EmbodiedTool(Tool):
             return _NO_TTY_MSG
         ports = setup.get("scanned_ports", [])
         if not ports:
-            return "No serial ports detected. Run onboard first."
+            return "No serial ports detected."
         argv = [sys.executable, "-m", "roboclaw.embodied.identify", json.dumps(ports)]
         rc = await self._run_tty(LocalLeRobotRunner(), argv, "identify-arms")
         if rc == 0:
-            return "Arm identification complete. Use setup_show to see results."
+            return "Arm identification complete."
         return f"Arm identification failed (exit {rc})."
 
-    async def _do_calibrate(self, setup: dict) -> str:
+    async def _do_calibrate(self, setup: dict, kwargs: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
         from roboclaw.embodied.runner import LocalLeRobotRunner
         from roboclaw.embodied.setup import arm_display_name, mark_arm_calibrated
 
         arms = setup.get("arms", [])
         if not arms:
-            return "No arms configured in setup. Use set_arm to add arms first."
-        uncalibrated = [a for a in arms if a.get("calibrated") is not True]
-        if not uncalibrated:
+            return "No arms configured."
+        selected_name = kwargs.get("name", "")
+        targets = _select_arms_for_calibration(arms, selected_name)
+        if isinstance(targets, str):
+            return targets
+        if not targets:
             return "All arms are already calibrated."
         if not self._tty_handoff:
             return _NO_TTY_MSG
@@ -278,7 +281,7 @@ class EmbodiedTool(Tool):
         runner = LocalLeRobotRunner()
         succeeded, failed = 0, 0
         results = []
-        for arm in uncalibrated:
+        for arm in targets:
             display = arm_display_name(arm)
             argv = controller.calibrate(
                 arm["type"],
@@ -286,14 +289,17 @@ class EmbodiedTool(Tool):
                 arm.get("calibration_dir", ""),
                 _arm_id(arm),
             )
+            print(f"\n=== Calibrating: {display} ===")
             returncode = await self._run_tty(runner, argv, f"lerobot-calibrate ({display})")
+            if returncode in (130, -2):
+                return "interrupted"
             if returncode == 0:
                 succeeded += 1
                 mark_arm_calibrated(arm["alias"])
                 results.append(f"{display}: OK")
-            else:
-                failed += 1
-                results.append(f"{display}: FAILED (exit {returncode})")
+                continue
+            failed += 1
+            results.append(f"{display}: FAILED (exit {returncode})")
         return (
             f"{succeeded} succeeded, {failed} failed.\n"
             + "\n".join(results)
@@ -411,7 +417,7 @@ class EmbodiedTool(Tool):
         arms = setup.get("arms", [])
         followers = [a for a in arms if "follower" in a.get("type", "")]
         if not followers:
-            return "No follower arm configured. Use set_arm to add one."
+            return "No follower arm configured."
         follower = followers[0]
         cameras = self._resolve_cameras(setup)
         policies_root = setup.get("policies", {}).get("root", "")
@@ -470,7 +476,7 @@ def _resolve_operation_arms(
 
     arms = setup.get("arms", [])
     if not arms:
-        return "No arms configured. Use set_arm to add arms first."
+        return "No arms configured."
     follower_names = _parse_names(follower_names_str)
     leader_names = _parse_names(leader_names_str)
     if not follower_names or not leader_names:
@@ -506,10 +512,30 @@ def _auto_resolve(
         return leaders
 
     if not followers:
-        return "No follower arms configured. Use set_arm to add arms."
+        return "No follower arms configured."
     if not leaders:
-        return "No leader arms configured. Use set_arm to add arms."
+        return "No leader arms configured."
     return _build_result(followers, leaders)
+
+
+def _select_arms_for_calibration(arms: list[dict], name: str) -> list[dict] | str:
+    """Select target arms for calibrate, supporting optional alias filtering."""
+    if name:
+        target = _find_arm_for_calibration(arms, name)
+        if isinstance(target, str):
+            return target
+        return [target]
+    return [arm for arm in arms if arm.get("calibrated") is not True]
+
+
+def _find_arm_for_calibration(arms: list[dict], name: str) -> dict | str:
+    """Resolve the requested arm alias for calibrate."""
+    from roboclaw.embodied.setup import find_arm
+
+    arm = find_arm(arms, name)
+    if arm is None:
+        return f"No arm named '{name}' found in setup."
+    return arm
 
 
 def _lookup_arms(arms: list[dict], names: list[str], label: str) -> list[dict] | str:
