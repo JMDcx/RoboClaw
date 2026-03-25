@@ -1,8 +1,11 @@
 """Embodied tool — bridges agent to the embodied robotics layer."""
 
 import json
+import shutil
 import sys
+from contextlib import contextmanager
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from roboclaw.agent.tools.base import Tool
@@ -18,6 +21,7 @@ _ACTIONS = [
     "job_status",
     "setup_show",
     "set_arm",
+    "rename_arm",
     "remove_arm",
     "set_camera",
     "remove_camera",
@@ -25,13 +29,14 @@ _ACTIONS = [
 
 _LOGS_DIR = Path("~/.roboclaw/workspace/embodied/jobs").expanduser()
 _NO_TTY_MSG = "This action requires a local terminal. Run: roboclaw agent"
+_BIMANUAL_ID = "bimanual"
 
 
 class EmbodiedTool(Tool):
     """Control embodied robots via the agent.
 
     The agent maintains setup.json through structured actions
-    (set_arm, remove_arm, set_camera, remove_camera, setup_show).
+    (set_arm, rename_arm, remove_arm, set_camera, remove_camera, setup_show).
     All hardware actions read setup.json for arm ports, cameras, calibration dirs.
     """
 
@@ -49,7 +54,7 @@ class EmbodiedTool(Tool):
             "NEVER use exec for /dev queries. "
             "Actions: setup_show (view config), identify (detect arms), "
             "calibrate, teleoperate, record, train, run_policy, job_status, "
-            "set_arm, remove_arm, set_camera, remove_camera. "
+            "set_arm, rename_arm, remove_arm, set_camera, remove_camera. "
             "Use arm aliases from setup.json for follower_names/leader_names."
         )
 
@@ -97,7 +102,11 @@ class EmbodiedTool(Tool):
                 },
                 "name": {
                     "type": "string",
-                    "description": "Arm alias (for set_arm / remove_arm).",
+                    "description": "Arm alias (for set_arm / rename_arm / remove_arm).",
+                },
+                "new_alias": {
+                    "type": "string",
+                    "description": "New arm alias (for rename_arm).",
                 },
                 "arm_type": {
                     "type": "string",
@@ -136,7 +145,7 @@ class EmbodiedTool(Tool):
         if action == "setup_show":
             return json.dumps(load_setup(), indent=2, ensure_ascii=False)
 
-        if action in ("set_arm", "remove_arm", "set_camera", "remove_camera"):
+        if action in ("set_arm", "rename_arm", "remove_arm", "set_camera", "remove_camera"):
             return self._handle_setup_action(action, kwargs)
 
         setup = ensure_setup()
@@ -162,10 +171,18 @@ class EmbodiedTool(Tool):
 
     def _handle_setup_action(self, action: str, kwargs: dict) -> str:
         """Dispatch structured setup mutations. Returns user-facing message."""
-        from roboclaw.embodied.setup import remove_arm, remove_camera, set_arm, set_camera
+        from roboclaw.embodied.setup import (
+            remove_arm,
+            remove_camera,
+            rename_arm,
+            set_arm,
+            set_camera,
+        )
 
         if action == "set_arm":
             return self._do_set_arm(kwargs, set_arm)
+        if action == "rename_arm":
+            return self._do_rename_arm(kwargs, rename_arm)
         if action == "remove_arm":
             return self._do_remove_arm(kwargs, remove_arm)
         if action == "set_camera":
@@ -193,6 +210,18 @@ class EmbodiedTool(Tool):
             return "remove_arm requires name."
         fn(alias)
         return f"Arm '{alias}' removed."
+
+    @staticmethod
+    def _do_rename_arm(kwargs: dict, fn: Any) -> str:
+        from roboclaw.embodied.setup import find_arm
+
+        old_alias = kwargs.get("name", "")
+        new_alias = kwargs.get("new_alias", "")
+        if not old_alias or not new_alias:
+            return "rename_arm requires name and new_alias."
+        updated = fn(old_alias, new_alias)
+        arm = find_arm(updated["arms"], new_alias)
+        return f"Arm renamed from '{old_alias}' to '{new_alias}'.\n{json.dumps(arm, indent=2)}"
 
     @staticmethod
     def _do_set_camera(kwargs: dict, fn: Any) -> str:
@@ -251,7 +280,12 @@ class EmbodiedTool(Tool):
         results = []
         for arm in uncalibrated:
             display = arm_display_name(arm)
-            argv = controller.calibrate(arm["type"], arm["port"], arm.get("calibration_dir", ""))
+            argv = controller.calibrate(
+                arm["type"],
+                arm["port"],
+                arm.get("calibration_dir", ""),
+                _arm_id(arm),
+            )
             returncode = await self._run_tty(runner, argv, f"lerobot-calibrate ({display})")
             if returncode == 0:
                 succeeded += 1
@@ -260,7 +294,11 @@ class EmbodiedTool(Tool):
             else:
                 failed += 1
                 results.append(f"{display}: FAILED (exit {returncode})")
-        return f"{succeeded} succeeded, {failed} failed.\n" + "\n".join(results)
+        return (
+            f"{succeeded} succeeded, {failed} failed.\n"
+            + "\n".join(results)
+            + "\nNote: wrist_roll is auto-calibrated by LeRobot (expected)."
+        )
 
     async def _do_teleoperate(self, setup: dict, kwargs: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
@@ -278,16 +316,27 @@ class EmbodiedTool(Tool):
             f, l = followers[0], leaders[0]
             argv = controller.teleoperate(
                 robot_type=f["type"], robot_port=f["port"], robot_cal_dir=f["calibration_dir"],
+                robot_id=_arm_id(f),
                 teleop_type=l["type"], teleop_port=l["port"], teleop_cal_dir=l["calibration_dir"],
+                teleop_id=_arm_id(l),
             )
             label = f"lerobot-teleoperate ({arm_display_name(f)} + {arm_display_name(l)})"
-        else:
+            rc = await self._run_tty(LocalLeRobotRunner(), argv, label)
+            return "Teleoperation finished." if rc == 0 else f"Teleoperation failed (exit {rc})."
+
+        label = "lerobot-teleoperate (bimanual)"
+        with _bimanual_cal_dirs(followers, leaders) as (robot_dir, teleop_dir):
             argv = controller.teleoperate_bimanual(
-                left_robot=followers[0], right_robot=followers[1],
-                left_teleop=leaders[0], right_teleop=leaders[1],
+                robot_id=_BIMANUAL_ID,
+                robot_cal_dir=robot_dir,
+                left_robot=followers[0],
+                right_robot=followers[1],
+                teleop_id=_BIMANUAL_ID,
+                teleop_cal_dir=teleop_dir,
+                left_teleop=leaders[0],
+                right_teleop=leaders[1],
             )
-            label = "lerobot-teleoperate (bimanual)"
-        rc = await self._run_tty(LocalLeRobotRunner(), argv, label)
+            rc = await self._run_tty(LocalLeRobotRunner(), argv, label)
         return "Teleoperation finished." if rc == 0 else f"Teleoperation failed (exit {rc})."
 
     async def _do_record(self, setup: dict, kwargs: dict) -> str:
@@ -314,16 +363,27 @@ class EmbodiedTool(Tool):
             f, l = followers[0], leaders[0]
             argv = controller.record(
                 robot_type=f["type"], robot_port=f["port"], robot_cal_dir=f["calibration_dir"],
+                robot_id=_arm_id(f),
                 teleop_type=l["type"], teleop_port=l["port"], teleop_cal_dir=l["calibration_dir"],
+                teleop_id=_arm_id(l),
                 **record_kwargs,
             )
-        else:
+            rc = await self._run_tty(LocalLeRobotRunner(), argv, "lerobot-record")
+            return "Recording finished." if rc == 0 else f"Recording failed (exit {rc})."
+
+        with _bimanual_cal_dirs(followers, leaders) as (robot_dir, teleop_dir):
             argv = controller.record_bimanual(
-                left_robot=followers[0], right_robot=followers[1],
-                left_teleop=leaders[0], right_teleop=leaders[1],
+                robot_id=_BIMANUAL_ID,
+                robot_cal_dir=robot_dir,
+                left_robot=followers[0],
+                right_robot=followers[1],
+                teleop_id=_BIMANUAL_ID,
+                teleop_cal_dir=teleop_dir,
+                left_teleop=leaders[0],
+                right_teleop=leaders[1],
                 **record_kwargs,
             )
-        rc = await self._run_tty(LocalLeRobotRunner(), argv, "lerobot-record")
+            rc = await self._run_tty(LocalLeRobotRunner(), argv, "lerobot-record")
         return "Recording finished." if rc == 0 else f"Recording failed (exit {rc})."
 
     async def _do_train(self, setup: dict, kwargs: dict) -> str:
@@ -358,6 +418,7 @@ class EmbodiedTool(Tool):
         checkpoint = kwargs.get("checkpoint_path") or ACTPipeline().checkpoint_path(policies_root)
         argv = SO101Controller().run_policy(
             robot_type=follower["type"], robot_port=follower["port"], robot_cal_dir=follower["calibration_dir"],
+            robot_id=_arm_id(follower),
             cameras=cameras, policy_path=checkpoint,
             num_episodes=kwargs.get("num_episodes", 1),
         )
@@ -473,3 +534,28 @@ def _build_result(followers: list[dict], leaders: list[dict]) -> dict[str, Any] 
     if len(followers) == 2:
         return {"followers": followers, "leaders": leaders, "mode": "bimanual"}
     return f"Unsupported arm count: {len(followers)}. Use 1 (single) or 2 (bimanual)."
+
+
+def _arm_id(arm: dict) -> str:
+    arm_id = Path(arm.get("calibration_dir", "")).name
+    if not arm_id:
+        raise ValueError(f"Arm '{arm.get('alias', 'unknown')}' has no serial-based calibration_dir.")
+    return arm_id
+
+
+@contextmanager
+def _bimanual_cal_dirs(followers: list[dict], leaders: list[dict]):
+    """Create temp dirs with staged calibration files for bimanual operation."""
+    with TemporaryDirectory(prefix="roboclaw-bimanual-robot-") as robot_dir:
+        with TemporaryDirectory(prefix="roboclaw-bimanual-teleop-") as teleop_dir:
+            _stage_bimanual_arm_pair(followers[0], followers[1], robot_dir)
+            _stage_bimanual_arm_pair(leaders[0], leaders[1], teleop_dir)
+            yield robot_dir, teleop_dir
+
+
+def _stage_bimanual_arm_pair(left_arm: dict, right_arm: dict, target_dir: str) -> None:
+    target = Path(target_dir)
+    for side, arm in [("left", left_arm), ("right", right_arm)]:
+        serial = _arm_id(arm)
+        source = Path(arm["calibration_dir"]).expanduser() / f"{serial}.json"
+        shutil.copy2(source, target / f"bimanual_{side}.json")

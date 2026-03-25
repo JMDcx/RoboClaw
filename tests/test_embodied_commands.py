@@ -11,17 +11,29 @@ def test_doctor_command() -> None:
 
 
 def test_calibrate_follower() -> None:
-    argv = SO101Controller().calibrate("so101_follower", "/dev/ttyACM0", "/cal/follower")
+    argv = SO101Controller().calibrate(
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/follower",
+        "5B14032630",
+    )
     assert "lerobot-calibrate" in argv
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
     assert "--robot.port=/dev/ttyACM0" in argv
     assert any("--robot.calibration_dir=" in a for a in argv)
 
 
 def test_calibrate_leader() -> None:
-    argv = SO101Controller().calibrate("so101_leader", "/dev/ttyACM1", "/cal/leader")
+    argv = SO101Controller().calibrate(
+        "so101_leader",
+        "/dev/ttyACM1",
+        "/cal/leader",
+        "5B14030892",
+    )
     assert "lerobot-calibrate" in argv
     assert "--teleop.type=so101_leader" in argv
+    assert "--teleop.id=5B14030892" in argv
     assert "--teleop.port=/dev/ttyACM1" in argv
     assert any("--teleop.calibration_dir=" in a for a in argv)
 
@@ -29,24 +41,56 @@ def test_calibrate_leader() -> None:
 def test_teleoperate() -> None:
     argv = SO101Controller().teleoperate(
         "so101_follower", "/dev/ttyACM0", "/cal/f",
+        "5B14032630",
         "so101_leader", "/dev/ttyACM1", "/cal/l",
+        "5B14030892",
     )
     assert "lerobot-teleoperate" in argv
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
     assert "--teleop.type=so101_leader" in argv
+    assert "--teleop.id=5B14030892" in argv
+
+
+def test_teleoperate_bimanual() -> None:
+    argv = SO101Controller().teleoperate_bimanual(
+        robot_id="bimanual",
+        robot_cal_dir="/cal/robot",
+        left_robot={"port": "/dev/a"},
+        right_robot={"port": "/dev/b"},
+        teleop_id="bimanual",
+        teleop_cal_dir="/cal/teleop",
+        left_teleop={"port": "/dev/c"},
+        right_teleop={"port": "/dev/d"},
+    )
+    assert argv[0] == "lerobot-teleoperate"
+    assert "--robot.id=bimanual" in argv
+    assert "--robot.calibration_dir=/cal/robot" in argv
+    assert "--teleop.id=bimanual" in argv
+    assert "--teleop.calibration_dir=/cal/teleop" in argv
+    assert "--robot.left_arm_config.port=/dev/a" in argv
+    assert "--robot.right_arm_config.port=/dev/b" in argv
+    assert "--teleop.left_arm_config.port=/dev/c" in argv
+    assert "--teleop.right_arm_config.port=/dev/d" in argv
+    assert not any(".left_arm_config.calibration_dir=" in a for a in argv)
+    assert not any(".right_arm_config.calibration_dir=" in a for a in argv)
 
 
 def test_record() -> None:
     cameras = {"front": {"type": "opencv", "index": 0}}
     argv = SO101Controller().record(
         "so101_follower", "/dev/ttyACM0", "/cal/f",
+        "5B14032630",
         "so101_leader", "/dev/ttyACM1", "/cal/l",
+        "5B14030892",
         cameras=cameras, repo_id="local/test_data",
         task="pick and place", fps=30, num_episodes=5,
     )
     assert "lerobot-record" in argv
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
     assert "--teleop.type=so101_leader" in argv
+    assert "--teleop.id=5B14030892" in argv
     assert any("--robot.cameras=" in a for a in argv)
     assert "--dataset.repo_id=local/test_data" in argv
     assert "--dataset.single_task=pick and place" in argv
@@ -58,10 +102,12 @@ def test_run_policy() -> None:
     cameras = {"front": {"type": "opencv", "index": 0}}
     argv = SO101Controller().run_policy(
         "so101_follower", "/dev/ttyACM0", "/cal/f",
+        "5B14032630",
         cameras=cameras, policy_path="/models/act_checkpoint",
     )
     assert "lerobot-record" in argv
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
     assert any("--policy.path=" in a for a in argv)
     assert any("--robot.cameras=" in a for a in argv)
     assert not any("--teleop" in a for a in argv)

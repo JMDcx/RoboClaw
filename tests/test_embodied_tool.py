@@ -9,12 +9,12 @@ import pytest
 from unittest.mock import patch as std_patch
 
 from roboclaw.embodied.setup import (
-    _CALIBRATION_ROOT,
     arm_display_name,
     find_arm,
     load_setup,
     remove_arm,
     remove_camera,
+    rename_arm,
     save_setup,
     set_arm,
     set_camera,
@@ -25,6 +25,13 @@ _MOCK_SCANNED_PORTS = [
     {"by_path": "/dev/serial/by-path/pci-0:2.1", "by_id": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B14032630-if00", "dev": "/dev/ttyACM0"},
     {"by_path": "/dev/serial/by-path/pci-0:2.2", "by_id": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B14030892-if00", "dev": "/dev/ttyACM1"},
 ]
+
+
+@pytest.fixture(autouse=True)
+def calibration_root(tmp_path: Path) -> Path:
+    root = tmp_path / "calibration"
+    with std_patch("roboclaw.embodied.setup._CALIBRATION_ROOT", root):
+        yield root
 
 
 def test_tool_schema() -> None:
@@ -42,7 +49,7 @@ def test_tool_schema() -> None:
     expected_actions = [
         "doctor", "identify", "calibrate", "teleoperate", "record",
         "train", "run_policy", "job_status",
-        "setup_show", "set_arm", "remove_arm", "set_camera", "remove_camera",
+        "setup_show", "set_arm", "rename_arm", "remove_arm", "set_camera", "remove_camera",
     ]
     assert action_schema["enum"] == expected_actions
 
@@ -106,10 +113,15 @@ async def test_calibrate_all_arms() -> None:
         result = await tool.execute(action="calibrate")
 
     assert "2 succeeded" in result
+    assert "wrist_roll is auto-calibrated" in result
     assert "right_follower" in result
     assert "left_leader" in result
     assert mock_runner.run_interactive.call_count == 2
     assert mock_handoff.call_count == 4  # start+stop for each arm
+    follower_argv = mock_runner.run_interactive.call_args_list[0].args[0]
+    leader_argv = mock_runner.run_interactive.call_args_list[1].args[0]
+    assert "--robot.id=f" in follower_argv
+    assert "--teleop.id=l" in leader_argv
 
 
 @pytest.mark.asyncio
@@ -147,7 +159,9 @@ async def test_record_action() -> None:
     assert "Recording finished" in result
     argv = mock_runner.run_interactive.call_args[0][0]
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=f" in argv
     assert "--teleop.type=so101_leader" in argv
+    assert "--teleop.id=l" in argv
     assert any("--robot.cameras=" in a for a in argv)
 
 
@@ -200,14 +214,14 @@ def setup_file(tmp_path: Path) -> Path:
     return p
 
 
-def test_set_arm(setup_file: Path) -> None:
+def test_set_arm(setup_file: Path, calibration_root: Path) -> None:
     with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
         result = set_arm("my_follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
     arm = find_arm(result["arms"], "my_follower")
     assert arm is not None
     assert arm["type"] == "so101_follower"
     assert arm["port"] == "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B14032630-if00"
-    assert arm["calibration_dir"] == str(_CALIBRATION_ROOT / "5B14032630")
+    assert arm["calibration_dir"] == str(calibration_root / "5B14032630")
     assert arm["calibrated"] is False
     # Verify persisted
     persisted = load_setup(setup_file)
@@ -223,6 +237,13 @@ def test_set_arm_replaces_existing(setup_file: Path) -> None:
     arm = find_arm(result["arms"], "my_arm")
     assert arm["type"] == "so101_leader"
     assert arm["port"] == "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B14030892-if00"
+
+
+def test_set_arm_rejects_duplicate_port(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        set_arm("left_arm", "so101_follower", "/dev/ttyACM0", path=setup_file)
+        with pytest.raises(ValueError, match="already assigned"):
+            set_arm("right_arm", "so101_leader", "/dev/ttyACM0", path=setup_file)
 
 
 def test_set_arm_resolves_volatile_port(setup_file: Path) -> None:
@@ -250,6 +271,32 @@ def test_set_arm_unmatched_volatile_port(setup_file: Path) -> None:
     assert arm["port"] == "/dev/ttyUSB99"
 
 
+def test_set_arm_marks_existing_calibration(setup_file: Path, calibration_root: Path) -> None:
+    serial = "5B14032630"
+    calibration_dir = calibration_root / serial
+    calibration_dir.mkdir(parents=True)
+    (calibration_dir / f"{serial}.json").write_text("{}", encoding="utf-8")
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_arm("my_follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
+    arm = find_arm(result["arms"], "my_follower")
+    assert arm["calibrated"] is True
+
+
+def test_set_arm_migrates_none_json(setup_file: Path, calibration_root: Path) -> None:
+    serial = "5B14032630"
+    calibration_dir = calibration_root / serial
+    calibration_dir.mkdir(parents=True)
+    legacy = calibration_dir / "None.json"
+    target = calibration_dir / f"{serial}.json"
+    legacy.write_text("{}", encoding="utf-8")
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_arm("my_follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
+    arm = find_arm(result["arms"], "my_follower")
+    assert arm["calibrated"] is True
+    assert not legacy.exists()
+    assert target.exists()
+
+
 def test_set_arm_invalid_type(setup_file: Path) -> None:
     with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
         with pytest.raises(ValueError, match="Invalid arm_type"):
@@ -271,6 +318,30 @@ def test_remove_arm(setup_file: Path) -> None:
 def test_remove_arm_missing(setup_file: Path) -> None:
     with pytest.raises(ValueError, match="No arm with alias"):
         remove_arm("nonexistent", path=setup_file)
+
+
+def test_rename_arm_preserves_fields(setup_file: Path, calibration_root: Path) -> None:
+    serial = "5B14032630"
+    calibration_dir = calibration_root / serial
+    calibration_dir.mkdir(parents=True)
+    (calibration_dir / f"{serial}.json").write_text("{}", encoding="utf-8")
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        set_arm("old_alias", "so101_follower", "/dev/ttyACM0", path=setup_file)
+    result = rename_arm("old_alias", "new_alias", path=setup_file)
+    arm = find_arm(result["arms"], "new_alias")
+    assert arm is not None
+    assert arm["port"] == "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B14032630-if00"
+    assert arm["calibration_dir"] == str(calibration_dir)
+    assert arm["calibrated"] is True
+    assert find_arm(result["arms"], "old_alias") is None
+
+
+def test_rename_arm_rejects_duplicate_alias(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        set_arm("left_arm", "so101_follower", "/dev/ttyACM0", path=setup_file)
+        set_arm("right_arm", "so101_leader", "/dev/ttyACM1", path=setup_file)
+    with pytest.raises(ValueError, match="already exists"):
+        rename_arm("left_arm", "right_arm", path=setup_file)
 
 
 def test_set_camera(setup_file: Path) -> None:
@@ -427,6 +498,7 @@ async def test_teleoperate_bimanual() -> None:
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=bimanual_setup),
+        patch("roboclaw.embodied.tool.shutil.copy2") as mock_copy,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(
@@ -439,19 +511,67 @@ async def test_teleoperate_bimanual() -> None:
     argv = mock_runner.run_interactive.call_args[0][0]
     assert "lerobot-teleoperate" == argv[0]
     assert "--robot.type=bi_so_follower" in argv
+    assert "--robot.id=bimanual" in argv
+    assert any(a.startswith("--robot.calibration_dir=") for a in argv)
     assert "--teleop.type=bi_so_leader" in argv
+    assert "--teleop.id=bimanual" in argv
+    assert any(a.startswith("--teleop.calibration_dir=") for a in argv)
     assert any("--robot.left_arm_config.port=" in a for a in argv)
     assert any("--robot.right_arm_config.port=" in a for a in argv)
     assert any("--teleop.left_arm_config.port=" in a for a in argv)
     assert any("--teleop.right_arm_config.port=" in a for a in argv)
+    assert not any(".left_arm_config.calibration_dir=" in a for a in argv)
+    assert not any(".right_arm_config.calibration_dir=" in a for a in argv)
+    copy_targets = [call.args[1] for call in mock_copy.call_args_list]
+    assert any(str(target).endswith("bimanual_left.json") for target in copy_targets)
+    assert any(str(target).endswith("bimanual_right.json") for target in copy_targets)
+
+
+@pytest.mark.asyncio
+async def test_record_bimanual() -> None:
+    bimanual_setup = {
+        **_MOCK_SETUP,
+        "arms": [
+            {"alias": "left_f", "type": "so101_follower", "port": "/dev/a", "calibration_dir": "/c/5B14032630", "calibrated": True},
+            {"alias": "right_f", "type": "so101_follower", "port": "/dev/b", "calibration_dir": "/c/5B14030892", "calibrated": True},
+            {"alias": "left_l", "type": "so101_leader", "port": "/dev/c", "calibration_dir": "/c/5B14030001", "calibrated": True},
+            {"alias": "right_l", "type": "so101_leader", "port": "/dev/d", "calibration_dir": "/c/5B14030002", "calibrated": True},
+        ],
+    }
+    tool = EmbodiedTool(tty_handoff=AsyncMock())
+    mock_runner = AsyncMock()
+    mock_runner.run_interactive.return_value = 0
+
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=bimanual_setup),
+        patch("roboclaw.embodied.tool.shutil.copy2") as mock_copy,
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
+        result = await tool.execute(
+            action="record",
+            dataset_name="test",
+            task="grasp",
+            follower_names="left_f,right_f",
+            leader_names="left_l,right_l",
+        )
+
+    assert "Recording finished" in result
+    argv = mock_runner.run_interactive.call_args[0][0]
+    assert "--robot.id=bimanual" in argv
+    assert "--teleop.id=bimanual" in argv
+    assert any(a.startswith("--robot.calibration_dir=") for a in argv)
+    assert any(a.startswith("--teleop.calibration_dir=") for a in argv)
+    assert not any(".left_arm_config.calibration_dir=" in a for a in argv)
+    assert not any(".right_arm_config.calibration_dir=" in a for a in argv)
+    assert len(mock_copy.call_args_list) == 4
 
 
 # ── Serial number extraction test ────────────────────────────────────
 
 
-def test_calibration_dir_uses_serial_number(setup_file: Path) -> None:
+def test_calibration_dir_uses_serial_number(setup_file: Path, calibration_root: Path) -> None:
     """calibration_dir should be based on serial number extracted from by_id port."""
     with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
         result = set_arm("my_follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
     arm = find_arm(result["arms"], "my_follower")
-    assert arm["calibration_dir"] == str(_CALIBRATION_ROOT / "5B14032630")
+    assert arm["calibration_dir"] == str(calibration_root / "5B14032630")

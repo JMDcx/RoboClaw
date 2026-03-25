@@ -6,6 +6,7 @@ import os
 import select
 import signal
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,8 @@ def _print_session_exit_message(session_id: str, *, prefix: str = "Goodbye!") ->
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+_tty_handoff_active = False
+_last_sigint_at = 0.0
 
 
 def _flush_pending_tty_input() -> None:
@@ -690,12 +693,17 @@ def agent(
     # TTY handoff for interactive embodied commands (calibrate, teleoperate, record)
     async def _embodied_tty_handoff(*, start: bool, label: str) -> None:
         nonlocal _thinking
+        global _tty_handoff_active, _last_sigint_at
         if start:
+            _tty_handoff_active = True
+            _last_sigint_at = 0.0
             if _thinking and _thinking._spinner and _thinking._active:
                 _thinking._spinner.stop()
             _flush_pending_tty_input()
             console.print(f"\n[dim]Executing {label}...[/dim]")
         else:
+            _tty_handoff_active = False
+            _last_sigint_at = 0.0
             _flush_pending_tty_input()
             console.print(f"[dim]{label} finished.[/dim]\n")
             if _thinking and _thinking._spinner and _thinking._active:
@@ -755,6 +763,18 @@ def agent(
             cli_channel, cli_chat_id = "cli", resolved_session_id
 
         def _handle_signal(signum, frame):
+            global _last_sigint_at
+            if signum == signal.SIGINT and _tty_handoff_active:
+                now = time.monotonic()
+                if now - _last_sigint_at <= 2:
+                    _restore_terminal()
+                    _print_session_exit_message(
+                        resolved_session_id,
+                        prefix="Received double Ctrl+C during terminal handoff, goodbye!",
+                    )
+                    sys.exit(130)
+                _last_sigint_at = now
+                return
             sig_name = signal.Signals(signum).name
             _restore_terminal()
             _print_session_exit_message(resolved_session_id, prefix=f"Received {sig_name}, goodbye!")

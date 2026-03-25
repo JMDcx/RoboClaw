@@ -27,7 +27,9 @@ class SO101Controller:
         )
         return ["python3", "-c", script]
 
-    def calibrate(self, arm_type: str, arm_port: str, calibration_dir: str) -> list[str]:
+    def calibrate(
+        self, arm_type: str, arm_port: str, calibration_dir: str, arm_id: str,
+    ) -> list[str]:
         """Build calibration command for one arm.
 
         arm_type: "so101_follower" or "so101_leader"
@@ -36,39 +38,49 @@ class SO101Controller:
         prefix = self._arm_prefix(arm_type)
         return [
             "lerobot-calibrate",
-            *self._arm_args(prefix, arm_type, arm_port, calibration_dir),
+            *self._arm_args(prefix, arm_type, arm_port, calibration_dir, arm_id),
         ]
 
     def teleoperate(
         self,
         robot_type: str, robot_port: str, robot_cal_dir: str,
+        robot_id: str,
         teleop_type: str, teleop_port: str, teleop_cal_dir: str,
+        teleop_id: str,
     ) -> list[str]:
         """Build teleoperation command (single follower + single leader)."""
         return [
             "lerobot-teleoperate",
-            *self._arm_args("robot", robot_type, robot_port, robot_cal_dir),
-            *self._arm_args("teleop", teleop_type, teleop_port, teleop_cal_dir),
+            *self._arm_args("robot", robot_type, robot_port, robot_cal_dir, robot_id),
+            *self._arm_args("teleop", teleop_type, teleop_port, teleop_cal_dir, teleop_id),
         ]
 
     def teleoperate_bimanual(
         self,
+        robot_id: str, robot_cal_dir: str,
         left_robot: dict, right_robot: dict,
+        teleop_id: str, teleop_cal_dir: str,
         left_teleop: dict, right_teleop: dict,
     ) -> list[str]:
         """Build bimanual teleoperation command (2 followers + 2 leaders)."""
         return [
             "lerobot-teleoperate",
             "--robot.type=bi_so_follower",
+            f"--robot.id={robot_id}",
+            f"--robot.calibration_dir={Path(robot_cal_dir).expanduser()}",
             *self._bimanual_arm_args("robot", left_robot, right_robot),
             "--teleop.type=bi_so_leader",
+            f"--teleop.id={teleop_id}",
+            f"--teleop.calibration_dir={Path(teleop_cal_dir).expanduser()}",
             *self._bimanual_arm_args("teleop", left_teleop, right_teleop),
         ]
 
     def record(
         self,
         robot_type: str, robot_port: str, robot_cal_dir: str,
+        robot_id: str,
         teleop_type: str, teleop_port: str, teleop_cal_dir: str,
+        teleop_id: str,
         cameras: dict[str, dict],
         repo_id: str, task: str,
         fps: int = 30, num_episodes: int = 10,
@@ -76,8 +88,8 @@ class SO101Controller:
         """Build recording command (follower + leader + cameras + dataset)."""
         return [
             "lerobot-record",
-            *self._arm_args("robot", robot_type, robot_port, robot_cal_dir),
-            *self._arm_args("teleop", teleop_type, teleop_port, teleop_cal_dir),
+            *self._arm_args("robot", robot_type, robot_port, robot_cal_dir, robot_id),
+            *self._arm_args("teleop", teleop_type, teleop_port, teleop_cal_dir, teleop_id),
             f"--robot.cameras={json.dumps(cameras)}",
             f"--dataset.repo_id={repo_id}",
             f"--dataset.single_task={task}",
@@ -87,7 +99,9 @@ class SO101Controller:
 
     def record_bimanual(
         self,
+        robot_id: str, robot_cal_dir: str,
         left_robot: dict, right_robot: dict,
+        teleop_id: str, teleop_cal_dir: str,
         left_teleop: dict, right_teleop: dict,
         cameras: dict[str, dict],
         repo_id: str, task: str,
@@ -97,9 +111,13 @@ class SO101Controller:
         return [
             "lerobot-record",
             "--robot.type=bi_so_follower",
+            f"--robot.id={robot_id}",
+            f"--robot.calibration_dir={Path(robot_cal_dir).expanduser()}",
             *self._bimanual_arm_args("robot", left_robot, right_robot),
             f"--robot.cameras={json.dumps(cameras)}",
             "--teleop.type=bi_so_leader",
+            f"--teleop.id={teleop_id}",
+            f"--teleop.calibration_dir={Path(teleop_cal_dir).expanduser()}",
             *self._bimanual_arm_args("teleop", left_teleop, right_teleop),
             f"--dataset.repo_id={repo_id}",
             f"--dataset.single_task={task}",
@@ -110,6 +128,7 @@ class SO101Controller:
     def run_policy(
         self,
         robot_type: str, robot_port: str, robot_cal_dir: str,
+        robot_id: str,
         cameras: dict[str, dict],
         policy_path: str,
         repo_id: str = "local/eval",
@@ -118,7 +137,7 @@ class SO101Controller:
         """Build policy execution command (follower only, no teleop)."""
         return [
             "lerobot-record",
-            *self._arm_args("robot", robot_type, robot_port, robot_cal_dir),
+            *self._arm_args("robot", robot_type, robot_port, robot_cal_dir, robot_id),
             f"--robot.cameras={json.dumps(cameras)}",
             f"--policy.path={Path(policy_path).expanduser()}",
             f"--dataset.repo_id={repo_id}",
@@ -132,9 +151,12 @@ class SO101Controller:
             return "robot"
         raise ValueError(f"Unsupported arm type: {arm_type}")
 
-    def _arm_args(self, prefix: str, arm_type: str, port: str, cal_dir: str) -> list[str]:
+    def _arm_args(
+        self, prefix: str, arm_type: str, port: str, cal_dir: str, arm_id: str,
+    ) -> list[str]:
         return [
             f"--{prefix}.type={arm_type}",
+            f"--{prefix}.id={arm_id}",
             f"--{prefix}.port={port}",
             f"--{prefix}.calibration_dir={Path(cal_dir).expanduser()}",
         ]
@@ -145,5 +167,4 @@ class SO101Controller:
         for side, arm in [("left", left), ("right", right)]:
             base = f"--{prefix}.{side}_arm_config"
             args.append(f"{base}.port={arm['port']}")
-            args.append(f"{base}.calibration_dir={Path(arm['calibration_dir']).expanduser()}")
         return args
