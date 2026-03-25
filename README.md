@@ -65,7 +65,7 @@ RoboClaw references and inherits part of its initial thinking from [nanobot](htt
 - Discord: [Join the server](https://discord.gg/HNcDbDYR)
 - WeChat official post: [Coming Soon](https://evorl.example.com/wechat-post)
 - GitHub Issues: [Create an issue](https://github.com/MINT-SJTU/RoboClaw/issues)
-- Email: business@evomind-tech.com
+- Email: bozhaonanjing [[@]] gmail [[DOT]] com
 
 ## Affiliations
 
