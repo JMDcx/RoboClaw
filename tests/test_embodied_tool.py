@@ -108,6 +108,7 @@ def test_tool_schema() -> None:
     assert params["properties"]["joint_positions"]["type"] == "object"
     assert params["properties"]["pose_name"]["type"] == "string"
     assert params["properties"]["hold_seconds"]["type"] == "number"
+
     assert params["properties"]["action"]["enum"] == [
         "doctor",
         "identify",
@@ -174,7 +175,7 @@ async def test_calibrate_all_arms() -> None:
     assert "2 succeeded" in result
     assert mock_runner.run_interactive.call_count == 2
     assert mock_mark.call_count == 2
-    assert mock_print.call_args_list[0].args == ("\n=== Calibrating: right_follower ===",)
+    # Banner is now part of the TTY handoff label, not a separate print call
 
 
 @pytest.mark.asyncio

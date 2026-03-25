@@ -467,8 +467,7 @@ class EmbodiedTool(Tool):
                 arm.get("calibration_dir", ""),
                 _arm_id(arm),
             )
-            print(f"\n=== Calibrating: {display} ===")
-            rc = await self._run_tty(runner, argv, f"lerobot-calibrate ({display})")
+            rc = await self._run_tty(runner, argv, f"Calibrating: {display}")
             if _is_interrupted(rc):
                 return "interrupted"
             if rc == 0:
