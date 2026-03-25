@@ -1,5 +1,7 @@
 """Tests for SO101Controller and ACTPipeline CLI arg generation."""
 
+import sys
+
 from roboclaw.embodied.embodiment.so101 import SO101Controller
 from roboclaw.embodied.learning.act import ACTPipeline
 
@@ -11,60 +13,218 @@ def test_doctor_command() -> None:
 
 
 def test_calibrate_follower() -> None:
-    argv = SO101Controller().calibrate("so101_follower", "/dev/ttyACM0", "/cal/follower")
-    assert "lerobot-calibrate" in argv
+    argv = SO101Controller().calibrate(
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/follower",
+        "5B14032630",
+    )
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "calibrate"]
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
     assert "--robot.port=/dev/ttyACM0" in argv
-    assert any("--robot.calibration_dir=" in a for a in argv)
+    assert any("--robot.calibration_dir=" in arg for arg in argv)
 
 
 def test_calibrate_leader() -> None:
-    argv = SO101Controller().calibrate("so101_leader", "/dev/ttyACM1", "/cal/leader")
-    assert "lerobot-calibrate" in argv
+    argv = SO101Controller().calibrate(
+        "so101_leader",
+        "/dev/ttyACM1",
+        "/cal/leader",
+        "5B14030892",
+    )
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "calibrate"]
     assert "--teleop.type=so101_leader" in argv
+    assert "--teleop.id=5B14030892" in argv
     assert "--teleop.port=/dev/ttyACM1" in argv
-    assert any("--teleop.calibration_dir=" in a for a in argv)
+    assert any("--teleop.calibration_dir=" in arg for arg in argv)
 
 
 def test_teleoperate() -> None:
     argv = SO101Controller().teleoperate(
-        "so101_follower", "/dev/ttyACM0", "/cal/f",
-        "so101_leader", "/dev/ttyACM1", "/cal/l",
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/f",
+        "5B14032630",
+        "so101_leader",
+        "/dev/ttyACM1",
+        "/cal/l",
+        "5B14030892",
     )
-    assert "lerobot-teleoperate" in argv
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "teleoperate"]
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
     assert "--teleop.type=so101_leader" in argv
+    assert "--teleop.id=5B14030892" in argv
+
+
+def test_teleoperate_bimanual() -> None:
+    argv = SO101Controller().teleoperate_bimanual(
+        robot_id="bimanual",
+        robot_cal_dir="/cal/robot",
+        left_robot={"port": "/dev/a"},
+        right_robot={"port": "/dev/b"},
+        teleop_id="bimanual",
+        teleop_cal_dir="/cal/teleop",
+        left_teleop={"port": "/dev/c"},
+        right_teleop={"port": "/dev/d"},
+    )
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "teleoperate"]
+    assert "--robot.id=bimanual" in argv
+    assert "--robot.calibration_dir=/cal/robot" in argv
+    assert "--teleop.id=bimanual" in argv
+    assert "--teleop.calibration_dir=/cal/teleop" in argv
+    assert "--robot.left_arm_config.port=/dev/a" in argv
+    assert "--robot.right_arm_config.port=/dev/b" in argv
+    assert "--teleop.left_arm_config.port=/dev/c" in argv
+    assert "--teleop.right_arm_config.port=/dev/d" in argv
+    assert not any(".left_arm_config.calibration_dir=" in arg for arg in argv)
+    assert not any(".right_arm_config.calibration_dir=" in arg for arg in argv)
 
 
 def test_record() -> None:
     cameras = {"front": {"type": "opencv", "index": 0}}
     argv = SO101Controller().record(
-        "so101_follower", "/dev/ttyACM0", "/cal/f",
-        "so101_leader", "/dev/ttyACM1", "/cal/l",
-        cameras=cameras, repo_id="local/test_data",
-        task="pick and place", fps=30, num_episodes=5,
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/f",
+        "5B14032630",
+        "so101_leader",
+        "/dev/ttyACM1",
+        "/cal/l",
+        "5B14030892",
+        cameras=cameras,
+        repo_id="local/test_data",
+        task="pick and place",
+        dataset_root="/data",
+        push_to_hub=False,
+        fps=30,
+        num_episodes=5,
     )
-    assert "lerobot-record" in argv
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "record"]
     assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
     assert "--teleop.type=so101_leader" in argv
-    assert any("--robot.cameras=" in a for a in argv)
+    assert "--teleop.id=5B14030892" in argv
+    assert any("--robot.cameras=" in arg for arg in argv)
     assert "--dataset.repo_id=local/test_data" in argv
+    assert "--dataset.root=/data" in argv
+    assert "--dataset.push_to_hub=false" in argv
     assert "--dataset.single_task=pick and place" in argv
     assert "--dataset.fps=30" in argv
     assert "--dataset.num_episodes=5" in argv
 
 
+def test_record_skips_empty_cameras() -> None:
+    argv = SO101Controller().record(
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/f",
+        "5B14032630",
+        "so101_leader",
+        "/dev/ttyACM1",
+        "/cal/l",
+        "5B14030892",
+        cameras={},
+        repo_id="local/test_data",
+        task="pick and place",
+        dataset_root="/data",
+    )
+    assert not any("--robot.cameras=" in arg for arg in argv)
+
+
+def test_record_bimanual_uses_per_arm_cameras() -> None:
+    cameras = {"front": {"type": "opencv", "index": 0}}
+    argv = SO101Controller().record_bimanual(
+        robot_id="bimanual",
+        robot_cal_dir="/cal/robot",
+        left_robot={"port": "/dev/a"},
+        right_robot={"port": "/dev/b"},
+        teleop_id="bimanual",
+        teleop_cal_dir="/cal/teleop",
+        left_teleop={"port": "/dev/c"},
+        right_teleop={"port": "/dev/d"},
+        cameras=cameras,
+        repo_id="local/test_data",
+        task="pick and place",
+        dataset_root="/data",
+        push_to_hub=False,
+        fps=30,
+        num_episodes=5,
+    )
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "record"]
+    assert "--dataset.root=/data" in argv
+    assert "--dataset.push_to_hub=false" in argv
+    assert not any(arg.startswith("--robot.cameras=") for arg in argv)
+    assert any(arg.startswith("--robot.left_arm_config.cameras=") for arg in argv)
+    assert any(arg.startswith("--robot.right_arm_config.cameras=") for arg in argv)
+
+
+def test_replay() -> None:
+    argv = SO101Controller().replay(
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/f",
+        "5B14032630",
+        repo_id="local/test_data",
+        dataset_root="/data",
+        episode=3,
+    )
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "replay"]
+    assert "--robot.type=so101_follower" in argv
+    assert "--robot.id=5B14032630" in argv
+    assert "--dataset.repo_id=local/test_data" in argv
+    assert "--dataset.root=/data" in argv
+    assert "--dataset.episode=3" in argv
+
+
+def test_replay_bimanual() -> None:
+    argv = SO101Controller().replay_bimanual(
+        robot_id="bimanual",
+        robot_cal_dir="/cal/robot",
+        left_robot={"port": "/dev/a"},
+        right_robot={"port": "/dev/b"},
+        repo_id="local/test_data",
+        dataset_root="/data",
+        episode=1,
+    )
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "replay"]
+    assert "--robot.id=bimanual" in argv
+    assert "--robot.calibration_dir=/cal/robot" in argv
+    assert "--robot.left_arm_config.port=/dev/a" in argv
+    assert "--robot.right_arm_config.port=/dev/b" in argv
+    assert "--dataset.root=/data" in argv
+    assert "--dataset.episode=1" in argv
+
+
 def test_run_policy() -> None:
     cameras = {"front": {"type": "opencv", "index": 0}}
     argv = SO101Controller().run_policy(
-        "so101_follower", "/dev/ttyACM0", "/cal/f",
-        cameras=cameras, policy_path="/models/act_checkpoint",
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/f",
+        "5B14032630",
+        cameras=cameras,
+        policy_path="/models/act_checkpoint",
     )
-    assert "lerobot-record" in argv
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "record"]
     assert "--robot.type=so101_follower" in argv
-    assert any("--policy.path=" in a for a in argv)
-    assert any("--robot.cameras=" in a for a in argv)
-    assert not any("--teleop" in a for a in argv)
+    assert "--robot.id=5B14032630" in argv
+    assert any("--policy.path=" in arg for arg in argv)
+    assert any("--robot.cameras=" in arg for arg in argv)
+    assert not any("--teleop" in arg for arg in argv)
+
+
+def test_run_policy_skips_empty_cameras() -> None:
+    argv = SO101Controller().run_policy(
+        "so101_follower",
+        "/dev/ttyACM0",
+        "/cal/f",
+        "5B14032630",
+        cameras={},
+        policy_path="/models/act_checkpoint",
+    )
+    assert not any("--robot.cameras=" in arg for arg in argv)
 
 
 def test_train() -> None:

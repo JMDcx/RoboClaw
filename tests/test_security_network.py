@@ -74,7 +74,7 @@ def test_allows_public_ip():
 
 def test_allows_normal_https():
     with patch("roboclaw.security.network.socket.getaddrinfo", _fake_resolve("github.com", ["140.82.121.3"])):
-        ok, err = validate_url_target("https://github.com/HKUDS/roboclaw")
+        ok, err = validate_url_target("https://github.com/MINT-SJTU/RoboClaw")
         assert ok
 
 

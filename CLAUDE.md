@@ -13,13 +13,22 @@
 
 ## 工作规范
 
-### 多角度思考（Codex 协作）
+### 并行协作（Claude sub-agent + Codex sub-agent）
 
-当用户要求从多角度思考、需要更全面的方案时，根据当前阶段调用对应的 Codex skill：
+所有非 trivial 的实现任务，必须起两个并行 **sub-agent** 写完全相同的代码：
+- **Claude sub-agent**：用 Agent tool 启动，`isolation: "worktree"` 在独立 git worktree 中工作。
+- **Codex sub-agent**：手动创建 git worktree（`git worktree add /tmp/roboclaw-codex-xxx HEAD`），然后用 `/codex-dispatch` 在该 worktree 中执行。
+- 两个 sub-agent **同时启动**，写完全相同的任务。完成后对比两个版本，取各自优点合并到主分支。
+- 合并后清理所有 worktree。
 
-- **规划阶段**：用 `/codex-plan` 让 Codex 出一份独立的实现方案，对比自己的思路后整合。
-- **编码阶段**：用 `/codex-dispatch` 将子任务分发给 Codex 并行编写，Codex 可在 worktree 中独立工作；如果 worktree 不方便则一起改同一份代码。
-- **审查阶段**：用 `/codex-review` 让 Codex 从新视角审查变更，发现盲点和潜在问题。
+规划阶段同样并行：自己出方案 + `/codex-plan` 出独立方案，整合后给用户。
+
+### 提交前双路审查
+
+commit 前必须跑两个 review（同样用 sub-agent 并行）：
+- **Claude sub-agent** 执行 `/simplify`：检查代码复用、质量、效率。发现问题直接修。
+- **Codex sub-agent** 执行 `/codex-review`：从独立视角审查，发现盲点。
+- 审查必须覆盖本文件中的所有代码规范（缩进层数、文件行数、try/except、复用等），不能只看功能正确性。
 
 ### 测试与交互
 
@@ -29,12 +38,6 @@
 
 - RoboClaw 对用户的对话必须保持高层次和通用化。不暴露串口路径、底层协议细节、内部技术实现。用户应无感地完成操作。
 
-### 提交前审查
-
-- commit 前必须用 `/simplify` 进行 review，检查代码规范、复用、质量和效率。发现问题先修再提交。
-- 当用户要求多角度审查，或改动超过 300 行时，额外用 `/codex-review` 从独立视角审查。
-- 审查必须覆盖本文件中的所有代码规范（缩进层数、文件行数、try/except、复用等），不能只看功能正确性。
-
 ### 代码规范
 
 - 框架代码放 `roboclaw/embodied/`，用户资产放 `~/.roboclaw/workspace/embodied/`。
@@ -43,5 +46,6 @@
 - 复用优先。已有实现的功能不要重复造轮子，先找现有代码再决定是否新写。
 - 单个 .py 文件不超过 1000 行。超过时必须将独立逻辑拆分到单独的模块。
 - 嵌套不超过 3 层缩进。超过时应将内层逻辑提取为独立函数。
+
 
 ---

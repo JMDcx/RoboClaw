@@ -6,20 +6,18 @@ import os
 import select
 import signal
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-# Force UTF-8 encoding for Windows console
-if sys.platform == "win32":
-    if sys.stdout.encoding != "utf-8":
-        os.environ["PYTHONIOENCODING"] = "utf-8"
-        # Re-open stdout/stderr with UTF-8 encoding
-        try:
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+# Force UTF-8 encoding for CLI stdio
+os.environ["PYTHONIOENCODING"] = "utf-8"
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
 
 import typer
 from prompt_toolkit import print_formatted_text
@@ -67,6 +65,8 @@ def _print_session_exit_message(session_id: str, *, prefix: str = "Goodbye!") ->
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+_tty_handoff_active = False
+_last_sigint_at = 0.0
 
 
 def _flush_pending_tty_input() -> None:
@@ -193,6 +193,7 @@ class _ThinkingSpinner:
             "[dim]RoboClaw is thinking...[/dim]", spinner="dots"
         ) if enabled else None
         self._active = False
+        self._suspended = False
 
     def __enter__(self):
         if self._spinner:
@@ -206,6 +207,18 @@ class _ThinkingSpinner:
             self._spinner.stop()
         return False
 
+    def suspend(self) -> None:
+        """Stop the spinner until resume() is called."""
+        self._suspended = True
+        if self._spinner and self._active:
+            self._spinner.stop()
+
+    def resume(self) -> None:
+        """Restart the spinner after a suspend()."""
+        self._suspended = False
+        if self._spinner and self._active:
+            self._spinner.start()
+
     @contextmanager
     def pause(self):
         """Temporarily stop spinner while printing progress."""
@@ -214,7 +227,7 @@ class _ThinkingSpinner:
         try:
             yield
         finally:
-            if self._spinner and self._active:
+            if self._spinner and self._active and not self._suspended:
                 self._spinner.start()
 
 
@@ -327,7 +340,7 @@ def onboard():
     console.print("  1. Add your API key to [cyan]~/.roboclaw/config.json[/cyan]")
     console.print("     Get one at: https://openrouter.ai/keys")
     console.print("  2. Chat: [cyan]roboclaw agent -m \"Hello!\"[/cyan]")
-    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/roboclaw#-chat-apps[/dim]")
+    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/MINT-SJTU/RoboClaw#-chat-apps[/dim]")
 
 
 def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
@@ -693,16 +706,21 @@ def agent(
     # TTY handoff for interactive embodied commands (calibrate, teleoperate, record)
     async def _embodied_tty_handoff(*, start: bool, label: str) -> None:
         nonlocal _thinking
+        global _tty_handoff_active, _last_sigint_at
         if start:
-            if _thinking and _thinking._spinner and _thinking._active:
-                _thinking._spinner.stop()
+            _tty_handoff_active = True
+            _last_sigint_at = 0.0
+            if _thinking:
+                _thinking.suspend()
             _flush_pending_tty_input()
             console.print(f"\n[dim]Executing {label}...[/dim]")
         else:
+            _tty_handoff_active = False
+            _last_sigint_at = 0.0
             _flush_pending_tty_input()
             console.print(f"[dim]{label} finished.[/dim]\n")
-            if _thinking and _thinking._spinner and _thinking._active:
-                _thinking._spinner.start()
+            if _thinking:
+                _thinking.resume()
 
     agent_loop = AgentLoop(
         bus=bus,
@@ -758,6 +776,18 @@ def agent(
             cli_channel, cli_chat_id = "cli", resolved_session_id
 
         def _handle_signal(signum, frame):
+            global _last_sigint_at
+            if signum == signal.SIGINT and _tty_handoff_active:
+                now = time.monotonic()
+                if now - _last_sigint_at <= 2:
+                    _restore_terminal()
+                    _print_session_exit_message(
+                        resolved_session_id,
+                        prefix="Received double Ctrl+C during terminal handoff, goodbye!",
+                    )
+                    sys.exit(130)
+                _last_sigint_at = now
+                return
             sig_name = signal.Signals(signum).name
             _restore_terminal()
             _print_session_exit_message(resolved_session_id, prefix=f"Received {sig_name}, goodbye!")

@@ -62,10 +62,13 @@ _DEFAULT_SETUP: dict[str, Any] = {
 
 
 def load_setup(path: Path = SETUP_PATH) -> dict[str, Any]:
-    """Load setup.json, return defaults if not found."""
+    """Load setup.json, return defaults if not found. Refreshes calibration state from disk."""
     if not path.exists():
         return copy.deepcopy(_DEFAULT_SETUP)
-    return _merge_defaults(json.loads(path.read_text(encoding="utf-8")))
+    setup = _merge_defaults(json.loads(path.read_text(encoding="utf-8")))
+    if _refresh_calibration_state(setup):
+        save_setup(setup, path)
+    return setup
 
 
 def save_setup(setup: dict[str, Any], path: Path = SETUP_PATH) -> None:
@@ -195,7 +198,7 @@ def _extract_serial_number(port: str) -> str:
 def set_arm(
     alias: str, arm_type: str, port: str, *, path: Path = SETUP_PATH,
 ) -> dict[str, Any]:
-    """Add or update an arm by alias. Auto-fills calibration_dir, sets calibrated=False."""
+    """Add or update an arm by alias. Auto-fills calibration_dir and calibration state."""
     if arm_type not in _ARM_TYPES:
         raise ValueError(f"Invalid arm_type '{arm_type}'. Must be one of {_ARM_TYPES}.")
     if not port:
@@ -206,15 +209,18 @@ def set_arm(
     setup = load_setup(path)
     port = _resolve_port(port, scan_serial_ports())
     serial = _extract_serial_number(port)
+    calibration_dir = _CALIBRATION_ROOT / serial
+    _migrate_none_calibration_file(calibration_dir, serial)
+    existing = find_arm(setup.setdefault("arms", []), alias)
+    _ensure_unique_port(setup["arms"], alias, port)
     entry: dict[str, Any] = {
         "alias": alias,
         "type": arm_type,
         "port": port,
-        "calibration_dir": str(_CALIBRATION_ROOT / serial),
-        "calibrated": False,
+        "calibration_dir": str(calibration_dir),
+        "calibrated": _has_calibration_file(calibration_dir, serial),
     }
-    arms = setup.setdefault("arms", [])
-    existing = find_arm(arms, alias)
+    arms = setup["arms"]
     if existing is not None:
         idx = arms.index(existing)
         arms[idx] = entry
@@ -245,6 +251,24 @@ def remove_arm(alias: str, path: Path = SETUP_PATH) -> dict[str, Any]:
     if arm is None:
         raise ValueError(f"No arm with alias '{alias}' in setup.")
     arms.remove(arm)
+    save_setup(setup, path)
+    return setup
+
+
+def rename_arm(old_alias: str, new_alias: str, *, path: Path = SETUP_PATH) -> dict[str, Any]:
+    """Rename an arm alias without changing any hardware-backed fields."""
+    if not old_alias:
+        raise ValueError("Old arm alias is required.")
+    if not new_alias:
+        raise ValueError("New arm alias is required.")
+    setup = load_setup(path)
+    arms = setup.get("arms", [])
+    arm = find_arm(arms, old_alias)
+    if arm is None:
+        raise ValueError(f"No arm with alias '{old_alias}' in setup.")
+    if old_alias != new_alias and find_arm(arms, new_alias) is not None:
+        raise ValueError(f"Arm alias '{new_alias}' already exists.")
+    arm["alias"] = new_alias
     save_setup(setup, path)
     return setup
 
@@ -317,8 +341,6 @@ def _validate_cameras(cameras: Any) -> None:
             raise ValueError(f"Camera '{name}' has unknown fields: {bad_fields}")
 
 
-
-
 def _validate_unitree_g1(config: Any) -> None:
     """Validate Unitree G1 config block."""
     if not isinstance(config, dict):
@@ -356,3 +378,39 @@ def _merge_defaults(setup: dict[str, Any]) -> dict[str, Any]:
         else:
             merged[key] = value
     return merged
+
+
+def _ensure_unique_port(arms: list[dict], alias: str, port: str) -> None:
+    for arm in arms:
+        if arm.get("alias") == alias:
+            continue
+        if arm.get("port") == port:
+            raise ValueError(f"Port '{port}' is already assigned to arm '{arm['alias']}'.")
+
+
+def _refresh_calibration_state(setup: dict[str, Any]) -> bool:
+    """Migrate None.json and recompute calibrated from disk for all arms. Returns True if anything changed."""
+    changed = False
+    for arm in setup.get("arms", []):
+        cal_dir = Path(arm.get("calibration_dir", ""))
+        serial = cal_dir.name
+        if not serial or not cal_dir.exists():
+            continue
+        _migrate_none_calibration_file(cal_dir, serial)
+        on_disk = _has_calibration_file(cal_dir, serial)
+        if arm.get("calibrated") != on_disk:
+            arm["calibrated"] = on_disk
+            changed = True
+    return changed
+
+
+def _has_calibration_file(calibration_dir: Path, serial: str) -> bool:
+    return (calibration_dir / f"{serial}.json").exists()
+
+
+def _migrate_none_calibration_file(calibration_dir: Path, serial: str) -> None:
+    legacy = calibration_dir / "None.json"
+    target = calibration_dir / f"{serial}.json"
+    if legacy.exists() and not target.exists():
+        legacy.rename(target)
+

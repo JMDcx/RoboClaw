@@ -45,7 +45,7 @@ async def test_identify_no_ports() -> None:
     tool = EmbodiedTool(tty_handoff=AsyncMock())
     with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP_NO_PORTS):
         result = await tool.execute(action="identify")
-    assert "no serial ports" in result.lower()
+    assert result == "No serial ports detected."
 
 
 @pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def test_identify_success() -> None:
     ):
         result = await tool.execute(action="identify")
 
-    assert "identification complete" in result.lower()
+    assert result == "Arm identification complete."
     assert mock_handoff.call_count == 2  # start + stop
     argv = mock_runner.run_interactive.call_args[0][0]
     assert "roboclaw.embodied.identify" in " ".join(argv)
