@@ -10,8 +10,11 @@ from typing import Any
 
 _ARM_TYPES = ("so101_follower", "so101_leader")
 _ARM_FIELDS = {"alias", "type", "port", "calibration_dir", "calibrated"}
+_HAND_TYPES = ("revo2_left", "revo2_right")
+_HAND_FIELDS = {"alias", "type", "port"}
 _CAMERA_FIELDS = {"by_path", "by_id", "dev", "width", "height"}
-_VALID_TOP_KEYS = {"version", "arms", "cameras", "datasets", "policies", "scanned_ports", "scanned_cameras"}
+_VALID_TOP_KEYS = {"version", "arms", "hands", "cameras", "datasets", "policies", "scanned_ports", "scanned_cameras"}
+
 
 
 def get_roboclaw_home(home: str | Path | None = None) -> Path:
@@ -215,6 +218,50 @@ def rename_arm(old_alias: str, new_alias: str, *, path: Path | None = None) -> d
     return setup
 
 
+def set_hand(alias: str, hand_type: str, port: str, *, path: Path | None = None) -> dict[str, Any]:
+    """Add or update a dexterous hand by alias."""
+    if hand_type not in _HAND_TYPES:
+        raise ValueError(f"Invalid hand_type '{hand_type}'. Must be one of {_HAND_TYPES}.")
+    if not port:
+        raise ValueError("Hand port is required.")
+    if not alias:
+        raise ValueError("Hand alias is required.")
+    from roboclaw.embodied.scan import scan_serial_ports
+    path = path or get_setup_path()
+    setup = load_setup(path)
+    port = _resolve_port(port, scan_serial_ports())
+    entry: dict[str, Any] = {"alias": alias, "type": hand_type, "port": port}
+    hands = setup.setdefault("hands", [])
+    existing = find_hand(hands, alias)
+    if existing is not None:
+        hands[hands.index(existing)] = entry
+    else:
+        hands.append(entry)
+    save_setup(setup, path)
+    return setup
+
+
+def remove_hand(alias: str, path: Path | None = None) -> dict[str, Any]:
+    """Remove a hand by alias."""
+    path = path or get_setup_path()
+    setup = load_setup(path)
+    hands = setup.get("hands", [])
+    hand = find_hand(hands, alias)
+    if hand is None:
+        raise ValueError(f"No hand with alias '{alias}' in setup.")
+    hands.remove(hand)
+    save_setup(setup, path)
+    return setup
+
+
+def find_hand(hands: list[dict], alias: str) -> dict | None:
+    """Find a hand in the hands list by alias. Returns the dict or None."""
+    for hand in hands:
+        if hand.get("alias") == alias:
+            return hand
+    return None
+
+
 def set_camera(name: str, camera_index: int, path: Path | None = None) -> dict[str, Any]:
     """Add or update a camera by picking from scanned_cameras by index."""
     path = path or get_setup_path()
@@ -253,6 +300,7 @@ def _validate_setup(setup: dict[str, Any]) -> None:
     if invalid_top:
         raise ValueError(f"Unknown top-level keys: {invalid_top}")
     _validate_arms(setup.get("arms", []))
+    _validate_hands(setup.get("hands", []))
     _validate_cameras(setup.get("cameras", {}))
 
 
@@ -270,6 +318,22 @@ def _validate_arms(arms: Any) -> None:
         arm_type = arm.get("type")
         if arm_type is not None and arm_type not in _ARM_TYPES:
             raise ValueError(f"Arm '{alias}' has invalid type '{arm_type}'.")
+
+
+def _validate_hands(hands: Any) -> None:
+    """Validate all hand entries."""
+    if not isinstance(hands, list):
+        raise ValueError("'hands' must be a list.")
+    for hand in hands:
+        if not isinstance(hand, dict):
+            raise ValueError(f"Each hand entry must be a dict, got {type(hand).__name__}.")
+        alias = hand.get("alias", "<unknown>")
+        bad_fields = set(hand.keys()) - _HAND_FIELDS
+        if bad_fields:
+            raise ValueError(f"Hand '{alias}' has unknown fields: {bad_fields}")
+        hand_type = hand.get("type")
+        if hand_type is not None and hand_type not in _HAND_TYPES:
+            raise ValueError(f"Hand '{alias}' has invalid type '{hand_type}'.")
 
 
 def _validate_cameras(cameras: Any) -> None:

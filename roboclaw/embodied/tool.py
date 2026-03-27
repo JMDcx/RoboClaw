@@ -50,13 +50,16 @@ _ACTION_DESCRIPTIONS = {
 _SETUP_ACTIONS = [
     "setup_show", "set_arm", "remove_arm", "rename_arm",
     "set_camera", "remove_camera", "describe", "doctor",
+    "set_hand", "remove_hand",
+    "hand_open", "hand_close", "hand_pose", "hand_status",
 ]
 
 _TOOL_GROUPS: dict[str, dict[str, Any]] = {
     "embodied_setup": {
         "description": (
             "Configure robot hardware: show setup, add/remove/rename arms, "
-            "add/remove cameras, describe actions, check environment."
+            "add/remove cameras, describe actions, check environment. "
+            "Also manages Revo2 dexterous hands: set_hand, remove_hand."
         ),
         "actions": _SETUP_ACTIONS,
         "parameters": {
@@ -69,7 +72,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                 },
                 "alias": {
                     "type": "string",
-                    "description": "Arm alias for set_arm, rename_arm, or remove_arm.",
+                    "description": "Arm alias for set_arm, rename_arm, remove_arm, or hand alias for set_hand/remove_hand.",
                 },
                 "arm_type": {
                     "type": "string",
@@ -78,7 +81,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                 },
                 "port": {
                     "type": "string",
-                    "description": "Serial port path for set_arm.",
+                    "description": "Serial port path for set_arm or set_hand.",
                 },
                 "new_alias": {
                     "type": "string",
@@ -95,6 +98,20 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                 "target_action": {
                     "type": "string",
                     "description": "Action name to describe.",
+                },
+                "hand_type": {
+                    "type": "string",
+                    "enum": ["revo2_left", "revo2_right"],
+                    "description": "Hand hardware type for set_hand.",
+                },
+                "hand_name": {
+                    "type": "string",
+                    "description": "Revo2 hand alias for hand_* actions. Uses first hand if omitted.",
+                },
+                "positions": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "6 finger positions 0–1000 [thumb, index, middle, ring, pinky, wrist] for hand_pose.",
                 },
             },
             "required": ["action"],
@@ -228,6 +245,20 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": "ID of a background training job.",
                 },
+                "hand_type": {
+                    "type": "string",
+                    "enum": ["revo2_left", "revo2_right"],
+                    "description": "Hand hardware type (for set_hand).",
+                },
+                "hand_name": {
+                    "type": "string",
+                    "description": "Revo2 hand alias (for hand_* actions). Uses first revo2 hand if omitted.",
+                },
+                "positions": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "6 finger positions 0–1000 [thumb, index, middle, ring, pinky, wrist] (for hand_pose).",
+                },
             },
             "required": ["action"],
             "additionalProperties": False,
@@ -278,7 +309,6 @@ def create_embodied_tools(tty_handoff: Any = None) -> list[EmbodiedToolGroup]:
         for name, spec in _TOOL_GROUPS.items()
     ]
 
-
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -287,8 +317,8 @@ def create_embodied_tools(tty_handoff: Any = None) -> list[EmbodiedToolGroup]:
 _NO_SETUP_ACTIONS = frozenset({
     "setup_show", "describe", "set_arm", "rename_arm",
     "remove_arm", "set_camera", "remove_camera",
+    "set_hand", "remove_hand",
 })
-
 
 async def _dispatch(action: str, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     if action in _NO_SETUP_ACTIONS:
@@ -377,6 +407,29 @@ def _do_remove_camera(kwargs: dict[str, Any]) -> str:
     return f"Camera '{name}' removed."
 
 
+def _do_set_hand(kwargs: dict[str, Any]) -> str:
+    from roboclaw.embodied.setup import find_hand, set_hand
+
+    alias = kwargs.get("alias", "")
+    hand_type = kwargs.get("hand_type", "")
+    port = kwargs.get("port", "")
+    if not all([alias, hand_type, port]):
+        return "set_hand requires alias, hand_type, and port."
+    updated = set_hand(alias, hand_type, port)
+    hand = find_hand(updated["hands"], alias)
+    return f"Hand '{alias}' configured.\n{json.dumps(hand, indent=2)}"
+
+
+def _do_remove_hand(kwargs: dict[str, Any]) -> str:
+    from roboclaw.embodied.setup import remove_hand
+
+    alias = kwargs.get("alias", "")
+    if not alias:
+        return "remove_hand requires alias."
+    remove_hand(alias)
+    return f"Hand '{alias}' removed."
+
+
 _SYNC_DISPATCH: dict[str, Any] = {
     "setup_show": _do_setup_show,
     "describe": _do_describe,
@@ -385,6 +438,8 @@ _SYNC_DISPATCH: dict[str, Any] = {
     "remove_arm": _do_remove_arm,
     "set_camera": _do_set_camera,
     "remove_camera": _do_remove_camera,
+    "set_hand": _do_set_hand,
+    "remove_hand": _do_remove_hand,
 }
 
 
@@ -743,6 +798,60 @@ async def _do_job_status(setup: dict[str, Any], kwargs: dict[str, Any], tty_hand
     return "\n".join(f"{key}: {value}" for key, value in status.items())
 
 
+def _resolve_revo2_hand(setup: dict[str, Any], hand_name: str) -> dict | str:
+    """Find a revo2 hand in setup by alias. Returns hand dict or error string."""
+    from roboclaw.embodied.setup import find_hand
+
+    hands = setup.get("hands", [])
+    if not hands:
+        return "No revo2 hand configured. Use set_hand(alias, hand_type, port) to add one."
+    if not hand_name:
+        return hands[0]
+    hand = find_hand(hands, hand_name)
+    if hand is None:
+        return f"No revo2 hand named '{hand_name}' found in setup."
+    return hand
+
+
+async def _do_hand_open(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+    from roboclaw.embodied.embodiment.revo2 import Revo2Controller
+
+    hand = _resolve_revo2_hand(setup, kwargs.get("hand_name", ""))
+    if isinstance(hand, str):
+        return hand
+    return await Revo2Controller().open_hand(hand["port"], hand.get("type"))
+
+
+async def _do_hand_close(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+    from roboclaw.embodied.embodiment.revo2 import Revo2Controller
+
+    hand = _resolve_revo2_hand(setup, kwargs.get("hand_name", ""))
+    if isinstance(hand, str):
+        return hand
+    return await Revo2Controller().close_hand(hand["port"], hand.get("type"))
+
+
+async def _do_hand_pose(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+    from roboclaw.embodied.embodiment.revo2 import Revo2Controller
+
+    hand = _resolve_revo2_hand(setup, kwargs.get("hand_name", ""))
+    if isinstance(hand, str):
+        return hand
+    positions = kwargs.get("positions")
+    if not positions:
+        return "hand_pose requires positions (6 integers 0–1000)."
+    return await Revo2Controller().set_pose(hand["port"], positions, hand.get("type"))
+
+
+async def _do_hand_status(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+    from roboclaw.embodied.embodiment.revo2 import Revo2Controller
+
+    hand = _resolve_revo2_hand(setup, kwargs.get("hand_name", ""))
+    if isinstance(hand, str):
+        return hand
+    return await Revo2Controller().get_status(hand["port"], hand.get("type"))
+
+
 _ASYNC_DISPATCH: dict[str, Any] = {
     "doctor": _do_doctor,
     "identify": _do_identify,
@@ -752,6 +861,10 @@ _ASYNC_DISPATCH: dict[str, Any] = {
     "replay": _do_replay,
     "train": _do_train,
     "job_status": _do_job_status,
+    "hand_open": _do_hand_open,
+    "hand_close": _do_hand_close,
+    "hand_pose": _do_hand_pose,
+    "hand_status": _do_hand_status,
 }
 
 

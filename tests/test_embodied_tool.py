@@ -14,13 +14,17 @@ from unittest.mock import patch as std_patch
 from roboclaw.embodied.setup import (
     arm_display_name,
     find_arm,
+    find_hand,
+    get_calibration_root,
     load_setup,
     remove_arm,
     remove_camera,
     rename_arm,
+    remove_hand,
     save_setup,
     set_arm,
     set_camera,
+    set_hand,
 )
 from roboclaw.embodied.tool import (
     EmbodiedToolGroup,
@@ -63,6 +67,7 @@ _MOCK_SETUP = {
             "calibrated": False,
         },
     ],
+    "hands": [],
     "cameras": {
         "front": {"by_path": "", "by_id": "", "dev": "/dev/video0"},
     },
@@ -507,6 +512,7 @@ def setup_file(tmp_path: Path) -> Path:
     base = {
         "version": 2,
         "arms": [],
+        "hands": [],
         "cameras": {},
         "datasets": {"root": "/data"},
         "policies": {"root": "/policies"},
@@ -725,3 +731,73 @@ def test_group_arms() -> None:
     grouped = _group_arms(_resolve_arms(_MOCK_SETUP, f"{_FOLLOWER_PORT},{_LEADER_PORT}"))
     assert [arm["alias"] for arm in grouped["followers"]] == ["right_follower"]
     assert [arm["alias"] for arm in grouped["leaders"]] == ["left_leader"]
+
+
+# ── Serial number extraction test ────────────────────────────────────
+
+
+def test_calibration_dir_uses_serial_number(setup_file: Path, calibration_root: Path) -> None:
+    """calibration_dir should be based on serial number extracted from by_id port."""
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_arm("my_follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
+    arm = find_arm(result["arms"], "my_follower")
+    assert arm["calibration_dir"] == str(calibration_root / "5B14032630")
+
+
+# ── set_hand / remove_hand / find_hand tests ─────────────────────────
+
+
+def test_set_hand(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_hand("left_hand", "revo2_left", "/dev/ttyACM0", path=setup_file)
+    hand = find_hand(result["hands"], "left_hand")
+    assert hand is not None
+    assert hand["type"] == "revo2_left"
+    assert hand["port"] == "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B14032630-if00"
+    assert "calibration_dir" not in hand
+    assert "calibrated" not in hand
+    persisted = load_setup(setup_file)
+    assert find_hand(persisted["hands"], "left_hand") == hand
+
+
+def test_set_hand_replaces_existing(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        set_hand("h", "revo2_left", "/dev/ttyACM0", path=setup_file)
+        result = set_hand("h", "revo2_right", "/dev/ttyACM1", path=setup_file)
+    assert len(result["hands"]) == 1
+    assert find_hand(result["hands"], "h")["port"] == "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B14030892-if00"
+
+
+def test_set_hand_invalid_type(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
+        with pytest.raises(ValueError, match="Invalid hand_type"):
+            set_hand("h", "so101_follower", "/dev/ttyUSB0", path=setup_file)
+
+
+def test_remove_hand(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
+        set_hand("left_hand", "revo2_left", "/dev/ttyUSB0", path=setup_file)
+    result = remove_hand("left_hand", path=setup_file)
+    assert find_hand(result["hands"], "left_hand") is None
+
+
+def test_remove_hand_missing(setup_file: Path) -> None:
+    with pytest.raises(ValueError, match="No hand with alias"):
+        remove_hand("nonexistent", path=setup_file)
+
+
+def test_find_hand() -> None:
+    hands = [
+        {"alias": "left", "type": "revo2_left", "port": "/dev/ttyUSB0"},
+        {"alias": "right", "type": "revo2_right", "port": "/dev/ttyUSB1"},
+    ]
+    assert find_hand(hands, "left") == hands[0]
+    assert find_hand(hands, "right") == hands[1]
+    assert find_hand(hands, "none") is None
+    assert find_hand([], "left") is None
+
+
+def test_set_arm_rejects_revo2(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
+        with pytest.raises(ValueError, match="Invalid arm_type"):
+            set_arm("h", "revo2", "/dev/ttyUSB0", path=setup_file)
