@@ -79,6 +79,29 @@ def scan_cameras() -> list[dict[str, str | int]]:
         restore_stderr(saved)
 
 
+def capture_camera_frames(
+    scanned_cameras: list[dict[str, str | int]], output_dir: str | Path,
+) -> list[dict[str, str]]:
+    """Capture one JPEG preview for each scanned camera."""
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError("OpenCV is required for camera previews.") from exc
+
+    previews: list[dict[str, str]] = []
+    target_dir = Path(output_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    saved = suppress_stderr()
+    try:
+        for index, camera in enumerate(scanned_cameras):
+            preview = _capture_camera_frame(cv2, camera, target_dir, index)
+            if preview is not None:
+                previews.append(preview)
+        return previews
+    finally:
+        restore_stderr(saved)
+
+
 def _probe_cameras(cv2, by_path: dict, by_id: dict) -> list[dict[str, str | int]]:
     """Try opening each /dev/videoN, return those that work."""
     cameras = []
@@ -107,6 +130,32 @@ def _try_open_camera(cv2, index: int, dev: str, by_path: dict, by_id: dict) -> d
             "dev": dev,
             "width": w,
             "height": h,
+        }
+    finally:
+        cap.release()
+
+
+def _capture_camera_frame(
+    cv2, camera: dict[str, str | int], output_dir: Path, index: int,
+) -> dict[str, str] | None:
+    source = str(camera.get("by_path") or camera.get("by_id") or camera.get("dev") or "")
+    label = source
+    if not source:
+        return None
+
+    cap = cv2.VideoCapture(source)
+    try:
+        if not cap.isOpened():
+            return None
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            return None
+        image_path = output_dir / f"{index:02d}_{Path(label).name}.jpg"
+        if not cv2.imwrite(str(image_path), frame):
+            raise RuntimeError(f"Failed to write camera preview to {image_path}")
+        return {
+            "camera": label,
+            "image_path": str(image_path),
         }
     finally:
         cap.release()

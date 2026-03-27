@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from collections import deque
 from pathlib import Path
 from uuid import uuid4
@@ -42,15 +43,28 @@ class LocalLeRobotRunner:
             stderr.decode("utf-8", errors="replace"),
         )
 
-    async def run_interactive(self, argv: list[str]) -> int:
-        """Run command with inherited TTY (user sees output directly). Returns exit code."""
+    async def run_interactive(self, argv: list[str]) -> tuple[int, str]:
+        """Run command with inherited TTY, tee stderr. Returns (exit code, stderr text)."""
         from roboclaw.embodied.stub import is_stub_mode
 
         if is_stub_mode() and "roboclaw.embodied.identify" not in argv:
-            return 0
+            return 0, ""
 
-        process = await asyncio.create_subprocess_exec(*argv, env=_utf8_env())
-        return await process.wait()
+        process = await asyncio.create_subprocess_exec(
+            *argv, stderr=asyncio.subprocess.PIPE, env=_utf8_env(),
+        )
+        chunks: list[bytes] = []
+
+        async def _tee_stderr() -> None:
+            assert process.stderr is not None
+            async for chunk in process.stderr:
+                sys.stderr.buffer.write(chunk)
+                sys.stderr.buffer.flush()
+                chunks.append(chunk)
+
+        await asyncio.gather(_tee_stderr(), process.wait())
+        stderr_text = b"".join(chunks).decode("utf-8", errors="replace")
+        return process.returncode or 0, stderr_text
 
     async def run_detached(self, argv: list[str], log_dir: Path) -> str:
         """Run command in background, return job_id (uuid). Save pid and log path."""

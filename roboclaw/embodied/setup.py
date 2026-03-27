@@ -239,7 +239,6 @@ def set_camera(name: str, camera_index: int, path: Path | None = None) -> dict[s
         "port": port,
         "width": source.get("width", 640),
         "height": source.get("height", 480),
-        "fps": 30,
     }
     cameras = setup.setdefault("cameras", [])
     existing = find_camera(cameras, name)
@@ -350,4 +349,3 @@ def _migrate_none_calibration_file(calibration_dir: Path, serial: str) -> None:
     target = calibration_dir / f"{serial}.json"
     if legacy.exists() and not target.exists():
         legacy.rename(target)
-

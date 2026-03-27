@@ -59,7 +59,7 @@ async def test_identify_success() -> None:
     mock_handoff = AsyncMock()
     tool = _hw_tool(tty_handoff=mock_handoff)
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP_WITH_PORTS),
@@ -78,7 +78,7 @@ async def test_identify_failure() -> None:
     """Identify subprocess failure should report the exit code."""
     tool = _hw_tool(tty_handoff=AsyncMock())
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 1
+    mock_runner.run_interactive.return_value = (1, "identify subprocess error")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP_WITH_PORTS),
