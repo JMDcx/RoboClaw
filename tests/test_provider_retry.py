@@ -87,6 +87,26 @@ async def test_chat_with_retry_returns_final_error_after_retries(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_retries_server_disconnected(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="Error calling LLM: Server disconnected without sending a response.", finish_reason="error"),
+        LLMResponse(content="ok"),
+    ])
+    delays: list[int] = []
+
+    async def _fake_sleep(delay: int) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("roboclaw.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok"
+    assert provider.calls == 2
+    assert delays == [1]
+
+
+@pytest.mark.asyncio
 async def test_chat_with_retry_preserves_cancelled_error() -> None:
     provider = ScriptedProvider([asyncio.CancelledError()])
 

@@ -86,6 +86,7 @@ class LLMProvider(ABC):
         "timeout",
         "timed out",
         "connection",
+        "disconnected",
         "server error",
         "temporarily unavailable",
     )

@@ -239,6 +239,8 @@ def test_train() -> None:
     assert "--dataset.repo_id=local/test_data" in argv
     assert "--dataset.root=/data" in argv
     assert "--policy.type=act" in argv
+    assert "--policy.push_to_hub=false" in argv
+    assert "--policy.repo_id=local/test_data" in argv
     assert "--steps=50000" in argv
     assert "--policy.device=cuda" in argv
 

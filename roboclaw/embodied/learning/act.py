@@ -22,6 +22,8 @@ class ACTPipeline:
             f"--dataset.repo_id={repo_id}",
             f"--dataset.root={Path(dataset_root).expanduser()}",
             "--policy.type=act",
+            "--policy.push_to_hub=false",
+            f"--policy.repo_id={repo_id}",
             f"--output_dir={Path(output_dir).expanduser()}",
             f"--steps={steps}",
             f"--policy.device={device}",
