@@ -9,7 +9,7 @@ from typing import Any
 def _resolve_hand(setup: dict[str, Any], hand_name: str) -> dict:
     """Find hand in setup by alias. Raises ActionError if not found."""
     from roboclaw.embodied.setup import find_hand
-    from roboclaw.embodied.tool import ActionError
+    from roboclaw.embodied.ops.helpers import ActionError
 
     hands = setup.get("hands", [])
     if not hands:
@@ -24,7 +24,7 @@ def _resolve_hand(setup: dict[str, Any], hand_name: str) -> dict:
 
 def _get_controller(hand_type: str):
     """Get the appropriate controller for the hand type."""
-    from roboclaw.embodied.tool import ActionError
+    from roboclaw.embodied.ops.helpers import ActionError
 
     if hand_type == "inspire_rh56":
         from roboclaw.embodied.embodiment.hand.inspire_rh56 import InspireController

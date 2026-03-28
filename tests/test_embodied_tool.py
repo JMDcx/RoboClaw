@@ -27,14 +27,9 @@ from roboclaw.embodied.setup import (
     set_camera,
     set_hand,
 )
-from roboclaw.embodied.tool import (
-    EmbodiedToolGroup,
-    _dataset_path,
-    _group_arms,
-    _resolve_cameras,
-    _resolve_arms,
-    create_embodied_tools,
-)
+from roboclaw.embodied.ops.helpers import _dataset_path, _group_arms, _resolve_arms
+from roboclaw.embodied.sensor.camera import resolve_cameras as _resolve_cameras
+from roboclaw.embodied.tool import EmbodiedToolGroup, create_embodied_tools
 
 _MOCK_SCANNED_PORTS = [
     {
@@ -202,7 +197,6 @@ async def test_calibrate_all_arms() -> None:
     mock_runner.run_interactive.return_value = (0, "")
 
     with (
-        patch("builtins.print") as mock_print,
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
@@ -228,7 +222,6 @@ async def test_calibrate_selected_arms_even_if_calibrated() -> None:
     mock_runner.run_interactive.return_value = (0, "")
 
     with (
-        patch("builtins.print"),
         patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
         patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
@@ -262,7 +255,6 @@ async def test_calibrate_interrupted_on_sigint() -> None:
     mock_runner.run_interactive.side_effect = [(0, ""), (130, "")]
 
     with (
-        patch("builtins.print"),
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
@@ -376,7 +368,7 @@ async def test_record_bimanual() -> None:
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
-        patch("roboclaw.embodied.tool.shutil.copy2") as mock_copy,
+        patch("roboclaw.embodied.ops.helpers.shutil.copy2") as mock_copy,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(
@@ -430,7 +422,7 @@ async def test_replay_bimanual_with_root_fallback() -> None:
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
-        patch("roboclaw.embodied.tool.shutil.copy2") as mock_copy,
+        patch("roboclaw.embodied.ops.helpers.shutil.copy2") as mock_copy,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="replay", dataset_name="test", arms="/dev/a,/dev/b")
@@ -468,7 +460,7 @@ async def test_teleoperate_bimanual() -> None:
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
-        patch("roboclaw.embodied.tool.shutil.copy2") as mock_copy,
+        patch("roboclaw.embodied.ops.helpers.shutil.copy2") as mock_copy,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="teleoperate", arms="/dev/a,/dev/b,/dev/c,/dev/d")
