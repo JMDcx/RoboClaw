@@ -157,7 +157,7 @@ def test_record_bimanual_uses_per_arm_cameras() -> None:
     assert "--dataset.push_to_hub=false" in argv
     assert not any(arg.startswith("--robot.cameras=") for arg in argv)
     assert any(arg.startswith("--robot.left_arm_config.cameras=") for arg in argv)
-    assert any(arg.startswith("--robot.right_arm_config.cameras=") for arg in argv)
+    assert not any(arg.startswith("--robot.right_arm_config.cameras=") for arg in argv)
 
 
 def test_replay() -> None:

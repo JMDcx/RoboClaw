@@ -72,7 +72,7 @@ _MOCK_SETUP = {
     ],
     "hands": [],
     "cameras": [
-        {"alias": "front", "port": "/dev/video0", "width": 640, "height": 480},
+        {"alias": "front", "port": "/dev/video0", "width": 640, "height": 480, "fps": 30},
     ],
     "datasets": {"root": "/data"},
     "policies": {"root": "/policies"},
@@ -898,16 +898,20 @@ def test_setup_schema_has_no_hand_runtime_params() -> None:
     assert props["hand_type"]["enum"] == ["inspire_rh56", "revo2"]
 
 
-def test_resolve_cameras_omits_missing_fps() -> None:
+def test_resolve_cameras_defaults_and_passthrough() -> None:
     setup = {
         "cameras": [
             {"alias": "front", "port": "/dev/video0", "width": 640, "height": 480},
             {"alias": "side", "port": "/dev/video1", "width": 320, "height": 240, "fps": 15},
+            {"alias": "dv20", "port": "/dev/video2", "width": 640, "height": 480, "fourcc": "MJPG"},
         ],
     }
     cameras = _resolve_cameras(setup)
-    assert "fps" not in cameras["front"]
+    assert cameras["front"]["fps"] == 30
+    assert "fourcc" not in cameras["front"]
     assert cameras["side"]["fps"] == 15
+    assert cameras["dv20"]["fourcc"] == "MJPG"
+    assert cameras["dv20"]["fps"] == 30
 
 
 def test_dataset_path_appends_local_and_dataset_name() -> None:

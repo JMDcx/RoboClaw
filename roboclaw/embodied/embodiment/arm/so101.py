@@ -48,13 +48,17 @@ class SO101Controller:
         robot_id: str,
         teleop_type: str, teleop_port: str, teleop_cal_dir: str,
         teleop_id: str,
+        cameras: dict[str, dict] | None = None,
     ) -> list[str]:
         """Build teleoperation command (single follower + single leader)."""
-        return [
+        argv = [
             *self._wrapper_args("teleoperate"),
             *self._arm_args("robot", robot_type, robot_port, robot_cal_dir, robot_id),
             *self._arm_args("teleop", teleop_type, teleop_port, teleop_cal_dir, teleop_id),
         ]
+        if cameras:
+            argv.append(f"--robot.cameras={json.dumps(cameras)}")
+        return argv
 
     def teleoperate_bimanual(
         self,
@@ -62,6 +66,7 @@ class SO101Controller:
         left_robot: dict, right_robot: dict,
         teleop_id: str, teleop_cal_dir: str,
         left_teleop: dict, right_teleop: dict,
+        cameras: dict[str, dict] | None = None,
     ) -> list[str]:
         """Build bimanual teleoperation command (2 followers + 2 leaders)."""
         return [
@@ -69,7 +74,7 @@ class SO101Controller:
             "--robot.type=bi_so_follower",
             f"--robot.id={robot_id}",
             f"--robot.calibration_dir={Path(robot_cal_dir).expanduser()}",
-            *self._bimanual_arm_args("robot", left_robot, right_robot),
+            *self._bimanual_arm_args("robot", left_robot, right_robot, cameras),
             "--teleop.type=bi_so_leader",
             f"--teleop.id={teleop_id}",
             f"--teleop.calibration_dir={Path(teleop_cal_dir).expanduser()}",
@@ -185,6 +190,8 @@ class SO101Controller:
         cameras: dict[str, dict],
         policy_path: str,
         repo_id: str = "local/eval",
+        dataset_root: str = "",
+        task: str = "eval",
         num_episodes: int = 1,
     ) -> list[str]:
         """Build policy execution command (follower only, no teleop)."""
@@ -195,8 +202,12 @@ class SO101Controller:
         argv.extend([
             f"--policy.path={Path(policy_path).expanduser()}",
             f"--dataset.repo_id={repo_id}",
+            f"--dataset.single_task={task}",
+            "--dataset.push_to_hub=false",
             f"--dataset.num_episodes={num_episodes}",
         ])
+        if dataset_root:
+            argv.append(f"--dataset.root={Path(dataset_root).expanduser()}")
         return argv
 
     def _wrapper_args(self, action: str) -> list[str]:
@@ -229,8 +240,7 @@ class SO101Controller:
         """Build --{prefix}.left_arm_config.* and --{prefix}.right_arm_config.* args."""
         args: list[str] = []
         for side, arm in [("left", left), ("right", right)]:
-            base = f"--{prefix}.{side}_arm_config"
-            args.append(f"{base}.port={arm['port']}")
-            if cameras:
-                args.append(f"{base}.cameras={json.dumps(cameras)}")
+            args.append(f"--{prefix}.{side}_arm_config.port={arm['port']}")
+        if cameras:
+            args.append(f"--{prefix}.left_arm_config.cameras={json.dumps(cameras)}")
         return args

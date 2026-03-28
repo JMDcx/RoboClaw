@@ -21,6 +21,7 @@ class ACTPipeline:
             "lerobot-train",
             f"--dataset.repo_id={repo_id}",
             f"--dataset.root={Path(dataset_root).expanduser()}",
+            "--dataset.video_backend=pyav",
             "--policy.type=act",
             "--policy.push_to_hub=false",
             f"--policy.repo_id={repo_id}",

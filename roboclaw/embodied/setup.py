@@ -12,7 +12,7 @@ _ARM_TYPES = ("so101_follower", "so101_leader")
 _ARM_FIELDS = {"alias", "type", "port", "calibration_dir", "calibrated"}
 _HAND_TYPES = ("inspire_rh56", "revo2")
 _HAND_FIELDS = {"alias", "type", "port", "slave_id"}
-_CAMERA_FIELDS = {"alias", "port", "width", "height", "fps"}
+_CAMERA_FIELDS = {"alias", "port", "width", "height", "fps", "fourcc"}
 _VALID_TOP_KEYS = {"version", "arms", "hands", "cameras", "datasets", "policies"}
 
 

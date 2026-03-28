@@ -562,13 +562,14 @@ async def _do_teleoperate(setup: dict[str, Any], kwargs: dict[str, Any], tty_han
     controller = SO101Controller()
     followers = grouped["followers"]
     leaders = grouped["leaders"]
+    cameras = _resolve_cameras(setup)
     if len(followers) == 1:
-        return await _teleoperate_single(controller, followers[0], leaders[0], tty_handoff)
-    return await _teleoperate_bimanual(controller, followers, leaders, tty_handoff)
+        return await _teleoperate_single(controller, followers[0], leaders[0], cameras, tty_handoff)
+    return await _teleoperate_bimanual(controller, followers, leaders, cameras, tty_handoff)
 
 
 async def _teleoperate_single(
-    controller: Any, follower: dict, leader: dict, tty_handoff: Any,
+    controller: Any, follower: dict, leader: dict, cameras: dict, tty_handoff: Any,
 ) -> str:
     from roboclaw.embodied.runner import LocalLeRobotRunner
     from roboclaw.embodied.setup import arm_display_name
@@ -582,6 +583,7 @@ async def _teleoperate_single(
         teleop_port=leader["port"],
         teleop_cal_dir=leader["calibration_dir"],
         teleop_id=_arm_id(leader),
+        cameras=cameras,
     )
     label = f"lerobot-teleoperate ({arm_display_name(follower)} + {arm_display_name(leader)})"
     rc, stderr_text = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, label)
@@ -596,6 +598,7 @@ async def _teleoperate_bimanual(
     controller: Any,
     followers: list[dict],
     leaders: list[dict],
+    cameras: dict,
     tty_handoff: Any,
 ) -> str:
     from roboclaw.embodied.runner import LocalLeRobotRunner
@@ -610,6 +613,7 @@ async def _teleoperate_bimanual(
             teleop_cal_dir=teleop_dir,
             left_teleop=leaders[0],
             right_teleop=leaders[1],
+            cameras=cameras,
         )
         rc, stderr_text = await _run_tty(
             tty_handoff, LocalLeRobotRunner(), argv, "lerobot-teleoperate (bimanual)",
@@ -731,6 +735,13 @@ async def _do_run_policy(setup: dict[str, Any], kwargs: dict[str, Any], tty_hand
     cameras = {} if kwargs.get("use_cameras") is False else _resolve_cameras(setup)
     policies_root = setup.get("policies", {}).get("root", "")
     checkpoint = kwargs.get("checkpoint_path") or ACTPipeline().checkpoint_path(policies_root)
+    dataset_name = kwargs.get("dataset_name", "eval_default")
+    error = _validate_dataset_name(dataset_name)
+    if error:
+        return error
+    if not dataset_name.startswith("eval_"):
+        dataset_name = f"eval_{dataset_name}"
+    dataset_root = _dataset_path(setup, dataset_name)
     argv = SO101Controller().run_policy(
         robot_type=follower["type"],
         robot_port=follower["port"],
@@ -738,6 +749,9 @@ async def _do_run_policy(setup: dict[str, Any], kwargs: dict[str, Any], tty_hand
         robot_id=_arm_id(follower),
         cameras=cameras,
         policy_path=checkpoint,
+        repo_id=f"local/{dataset_name}",
+        dataset_root=str(dataset_root),
+        task=kwargs.get("task", "eval"),
         num_episodes=kwargs.get("num_episodes", 1),
     )
     return await _run(LocalLeRobotRunner(), argv)
@@ -890,10 +904,11 @@ def _resolve_cameras(setup: dict[str, Any]) -> dict[str, dict]:
             "index_or_path": port,
             "width": cam.get("width", 640),
             "height": cam.get("height", 480),
+            "fps": cam.get("fps") or 30,
         }
-        fps = cam.get("fps")
-        if fps is not None:
-            config["fps"] = fps
+        fourcc = cam.get("fourcc")
+        if fourcc is not None:
+            config["fourcc"] = fourcc
         result[alias] = config
     return result
 
