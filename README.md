@@ -21,7 +21,24 @@
 
 ## 🎬 Demo
 
-<video src="https://github.com/user-attachments/assets/3c5d08ad-96f5-4d34-94e1-b9cdfeec41d5" autoplay loop muted playsinline width="100%"></video>
+<table>
+  <tr>
+    <th width="75%"><p align="center">🖥️ CLI</p></th>
+    <th width="25%"><p align="center">📱 Mobile</p></th>
+  </tr>
+  <tr>
+    <td align="center">
+      <video src="https://github.com/user-attachments/assets/3c5d08ad-96f5-4d34-94e1-b9cdfeec41d5" autoplay loop muted playsinline width="100%">
+        <a href="https://github.com/user-attachments/assets/3c5d08ad-96f5-4d34-94e1-b9cdfeec41d5">View demo video</a>
+      </video>
+    </td>
+    <td align="center">
+      <br/><br/><br/>
+      <b>Coming Soon</b>
+      <br/><br/><br/><br/>
+    </td>
+  </tr>
+</table>
 
 ## 📢 News
 
