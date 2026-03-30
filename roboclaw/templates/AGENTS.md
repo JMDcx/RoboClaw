@@ -5,6 +5,8 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 ## Embodied Tool Rules
 
 - ALWAYS use the embodied tool for any robot, arm, serial, USB, motor, camera, or hardware question.
+- Use `sim_camera(action=\"get_latest_frame\", camera_name=\"head\")` for Isaac Lab front-camera snapshots.
+- Use `perception(action=\"analyze_scene\", camera_name=\"head\")` for structured RGB scene analysis.
 - NEVER use exec to inspect /dev, serial devices, or raw hardware paths.
 - NEVER use exec with `rm`, `rmdir`, or `mv` on anything under `~/.roboclaw/workspace/embodied/`.
 - ALWAYS start hardware questions by calling embodied(action="setup_show").

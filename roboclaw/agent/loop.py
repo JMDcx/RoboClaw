@@ -16,11 +16,14 @@ from loguru import logger
 from roboclaw.agent.context import ContextBuilder
 from roboclaw.agent.memory import MemoryConsolidator
 from roboclaw.agent.subagent import SubagentManager
+from roboclaw.agent.tools.base import ToolResult
 from roboclaw.agent.tools.cron import CronTool
 from roboclaw.agent.skills import BUILTIN_SKILLS_DIR
 from roboclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from roboclaw.agent.tools.message import MessageTool
+from roboclaw.agent.tools.perception import PerceptionTool
 from roboclaw.agent.tools.registry import ToolRegistry
+from roboclaw.agent.tools.sim_camera import SimCameraTool
 from roboclaw.agent.tools.shell import ExecTool
 from roboclaw.agent.tools.spawn import SpawnTool
 from roboclaw.agent.tools.web import WebFetchTool, WebSearchTool
@@ -131,6 +134,8 @@ class AgentLoop:
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(SimCameraTool(workspace=self.workspace))
+        self.tools.register(PerceptionTool(workspace=self.workspace))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -231,9 +236,24 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    media: list[str] = []
+                    if isinstance(result, ToolResult):
+                        media = list(result.media)
+                        result_content = result.content
+                    else:
+                        result_content = result
                     messages = self.context.add_tool_result(
-                        messages, tool_call.id, tool_call.name, result
+                        messages, tool_call.id, tool_call.name, result_content
                     )
+                    if media:
+                        messages = self.context.add_user_media_message(
+                            messages,
+                            text=(
+                                f"Tool '{tool_call.name}' attached image evidence for this turn. "
+                                "Use the image together with the tool result above."
+                            ),
+                            media=media,
+                        )
             else:
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can

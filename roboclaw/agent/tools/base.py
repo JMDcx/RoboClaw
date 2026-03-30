@@ -1,7 +1,16 @@
 """Base class for agent tools."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass(slots=True)
+class ToolResult:
+    """Structured tool result that may include media for the next model turn."""
+
+    content: str
+    media: list[str] = field(default_factory=list)
 
 
 class Tool(ABC):
@@ -40,7 +49,7 @@ class Tool(ABC):
         pass
 
     @abstractmethod
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(self, **kwargs: Any) -> str | ToolResult:
         """
         Execute the tool with given parameters.
 

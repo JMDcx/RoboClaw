@@ -8,6 +8,7 @@ x-common-config: &common-config
 x-g1-common-config: &g1-common-config
   <<: *common-config
   network_mode: host
+  ipc: host
   entrypoint: ["/bin/bash", "-lc"]
 
 services:

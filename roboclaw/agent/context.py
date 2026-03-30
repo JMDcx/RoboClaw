@@ -165,6 +165,17 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             return text
         return images + [{"type": "text", "text": text}]
 
+    def add_user_media_message(
+        self,
+        messages: list[dict[str, Any]],
+        text: str,
+        media: list[str],
+    ) -> list[dict[str, Any]]:
+        """Append a user message containing media for the next assistant turn."""
+        content = self._build_user_content(text, media)
+        messages.append({"role": "user", "content": content})
+        return messages
+
     def add_tool_result(
         self, messages: list[dict[str, Any]],
         tool_call_id: str, tool_name: str, result: str,
