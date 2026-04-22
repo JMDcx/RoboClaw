@@ -23,8 +23,8 @@ class PerceptionTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Run RGB perception on the latest simulated head camera frame and return "
-            "structured object detections with temporal track IDs."
+            "Run RGB-D perception on the latest simulated head camera frame and return "
+            "structured object detections with temporal track IDs and grasp-oriented geometry."
         )
 
     @property

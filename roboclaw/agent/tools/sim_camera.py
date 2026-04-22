@@ -11,7 +11,7 @@ from roboclaw.sim_camera import IsaacSimCameraReader
 
 
 class SimCameraTool(Tool):
-    """Read the latest Isaac Lab RGB frame and make it available to the agent."""
+    """Read the latest Isaac Lab RGB-D frame and make it available to the agent."""
 
     def __init__(self, workspace: Path):
         self._workspace = workspace
@@ -25,7 +25,7 @@ class SimCameraTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Read the latest Isaac Lab RGB frame from shared memory. "
+            "Read the latest Isaac Lab RGB-D frame from shared memory. "
             "Use this for the simulated front_camera/head camera."
         )
 
@@ -60,22 +60,31 @@ class SimCameraTool(Tool):
             return "Error: Only camera_name='head' is supported."
 
         try:
-            frame, image_path = self._reader.save_latest_frame(self._cache_dir)
+            frame, image_path, depth_path, depth_vis_path = self._reader.save_latest_rgbd_frame(self._cache_dir)
         except Exception as exc:
             return f"Error: {exc}"
 
         payload = {
             "camera_name": camera_name,
             "image_path": str(image_path),
+            "depth_path": str(depth_path) if depth_path else None,
+            "depth_visualization_path": str(depth_vis_path) if depth_vis_path else None,
             "timestamp_ms": frame.timestamp_ms,
             "width": frame.width,
             "height": frame.height,
             "encoding": frame.encoding,
+            "has_depth": frame.depth_m is not None,
+            "depth_shape": list(frame.depth_m.shape) if frame.depth_m is not None else None,
+            "depth_min_m": float(frame.depth_m.min()) if frame.depth_m is not None else None,
+            "depth_max_m": float(frame.depth_m.max()) if frame.depth_m is not None else None,
             "fresh": frame.fresh,
         }
         content = (
-            "Loaded the latest Isaac Lab front camera frame. "
-            "The image is attached for immediate visual reasoning.\n"
+            "Loaded the latest Isaac Lab front camera RGB-D frame. "
+            "The RGB image and depth visualization are attached for immediate visual reasoning.\n"
             f"{json.dumps(payload, ensure_ascii=False)}"
         )
-        return ToolResult(content=content, media=[str(image_path)])
+        media = [str(image_path)]
+        if depth_vis_path is not None:
+            media.append(str(depth_vis_path))
+        return ToolResult(content=content, media=media)

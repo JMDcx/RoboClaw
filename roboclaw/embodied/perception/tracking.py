@@ -103,6 +103,9 @@ class TemporalObjectMemory:
 
     def _to_object(self, track: _TrackState, detection: dict[str, Any]) -> DetectedObject:
         return DetectedObject(
+            object_id=f"object_{track.track_id}",
+            raw_class_name=str(detection.get("raw_class_name") or detection["class_name"]),
+            task_label=str(detection.get("task_label") or "unknown"),
             track_id=track.track_id,
             class_name=str(detection["class_name"]),
             confidence=float(detection["confidence"]),
@@ -112,6 +115,8 @@ class TemporalObjectMemory:
             stable=track.stable,
             age=track.age,
             visibility=float(detection.get("visibility", 1.0)),
+            pickable=bool(detection.get("pickable")),
+            container_candidate=bool(detection.get("container_candidate")),
             attributes=dict(detection.get("attributes") or {}),
         )
 

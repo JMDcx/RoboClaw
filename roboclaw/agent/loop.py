@@ -21,11 +21,13 @@ from roboclaw.agent.tools.cron import CronTool
 from roboclaw.agent.skills import BUILTIN_SKILLS_DIR
 from roboclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from roboclaw.agent.tools.message import MessageTool
+from roboclaw.agent.tools.executor import ExecutorTool
 from roboclaw.agent.tools.perception import PerceptionTool
 from roboclaw.agent.tools.registry import ToolRegistry
 from roboclaw.agent.tools.sim_camera import SimCameraTool
 from roboclaw.agent.tools.shell import ExecTool
 from roboclaw.agent.tools.spawn import SpawnTool
+from roboclaw.agent.tools.task_state import TaskStateTool
 from roboclaw.agent.tools.web import WebFetchTool, WebSearchTool
 from roboclaw.bus.events import InboundMessage, OutboundMessage
 from roboclaw.bus.queue import MessageBus
@@ -136,6 +138,8 @@ class AgentLoop:
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SimCameraTool(workspace=self.workspace))
         self.tools.register(PerceptionTool(workspace=self.workspace))
+        self.tools.register(TaskStateTool(workspace=self.workspace))
+        self.tools.register(ExecutorTool(workspace=self.workspace))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -167,7 +171,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "task_state", "executor"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))

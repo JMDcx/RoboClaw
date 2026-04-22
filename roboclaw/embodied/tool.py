@@ -35,9 +35,14 @@ _ACTIONS = [
     "g1_status",
     "g1_move_joint",
     "g1_go_named_pose",
+    "g1_gripper_status",
+    "g1_gripper_move",
+    "g1_gripper_open",
+    "g1_gripper_close",
     "g1_hand_status",
     "g1_hand_move",
     "g1_hand_preset",
+    "g1_inspire_grasp_test",
 ]
 
 _ACTION_DESCRIPTIONS = {
@@ -57,9 +62,14 @@ _ACTION_DESCRIPTIONS = {
     "remove_arm": "Remove one configured arm alias.",
     "set_camera": "Assign a scanned camera to a stable camera name.",
     "remove_camera": "Remove a configured camera.",
+    "g1_gripper_status": "Inspect the latest Dex1 gripper DDS state and command targets for Unitree G1.",
+    "g1_gripper_move": "Send a normalized Dex1 close amount for Unitree G1 simulation.",
+    "g1_gripper_open": "Open the right-side Dex1 gripper in Unitree G1 simulation.",
+    "g1_gripper_close": "Close the right-side Dex1 gripper in Unitree G1 simulation.",
     "g1_hand_status": "Inspect the latest Inspire hand DDS state and command targets for Unitree G1.",
     "g1_hand_move": "Send normalized Inspire hand joint targets for Unitree G1 simulation.",
     "g1_hand_preset": "Execute a named Inspire hand preset such as open or grasp.",
+    "g1_inspire_grasp_test": "Run a sim-only RGB-D grasp test for G1 + Inspire in Isaac Lab.",
 }
 
 _LOGS_DIR = Path("~/.roboclaw/workspace/embodied/jobs").expanduser()
@@ -92,10 +102,13 @@ class EmbodiedTool(Tool):
             "Use set_camera/remove_camera to configure cameras (picks from scanned_cameras by index). "
             "For teleoperate/record, specify follower_names and leader_names (comma-separated aliases). "
             "1+1 = single arm, 2+2 = bimanual. "
-            "For Unitree G1 Isaac Lab simulation, use g1_setup, g1_connect, g1_status, g1_move_joint, g1_go_named_pose, g1_hand_status, g1_hand_move, and g1_hand_preset. "
+            "For Unitree G1 Isaac Lab simulation, use g1_setup, g1_connect, g1_status, g1_move_joint, g1_go_named_pose, "
+            "g1_gripper_status, g1_gripper_move, g1_gripper_open, g1_gripper_close, g1_hand_status, g1_hand_move, "
+            "g1_hand_preset, and g1_inspire_grasp_test. "
             "Actions: setup_show, identify, describe, calibrate, teleoperate, record, replay, train, run_policy, "
             "job_status, set_arm, rename_arm, remove_arm, set_camera, remove_camera, g1_setup, g1_connect, "
-            "g1_status, g1_move_joint, g1_go_named_pose, g1_hand_status, g1_hand_move, g1_hand_preset."
+            "g1_status, g1_move_joint, g1_go_named_pose, g1_gripper_status, g1_gripper_move, g1_gripper_open, "
+            "g1_gripper_close, g1_hand_status, g1_hand_move, g1_hand_preset, g1_inspire_grasp_test."
         )
 
     @property
@@ -204,6 +217,12 @@ class EmbodiedTool(Tool):
                     "description": "How long to keep publishing a G1 command.",
                     "minimum": 0.02,
                 },
+                "close_amount": {
+                    "type": "number",
+                    "description": "Normalized close amount for the Dex1 gripper. 0=open, 1=closed.",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                },
                 "robot_variant": {
                     "type": "string",
                     "enum": ["g129_dex1", "g129_inspire"],
@@ -221,6 +240,39 @@ class EmbodiedTool(Tool):
                 "preset_name": {
                     "type": "string",
                     "description": "Named G1 hand preset to execute: open, grasp, pinch, tripod, or relax.",
+                },
+                "target_object_id": {
+                    "type": "string",
+                    "description": "Optional target object_id from perception for g1_inspire_grasp_test.",
+                },
+                "arm_side": {
+                    "type": "string",
+                    "enum": ["left", "right"],
+                    "description": "Which G1 arm to use for the Inspire grasp test.",
+                },
+                "grasp_mode": {
+                    "type": "string",
+                    "description": "Grasp mode for g1_inspire_grasp_test. v1 supports top_grasp.",
+                },
+                "pregrasp_offset_m": {
+                    "type": "number",
+                    "description": "Vertical pregrasp offset in meters for g1_inspire_grasp_test.",
+                },
+                "descend_offset_m": {
+                    "type": "number",
+                    "description": "Vertical descend offset in meters for g1_inspire_grasp_test.",
+                },
+                "lift_height_m": {
+                    "type": "number",
+                    "description": "Lift height in meters for g1_inspire_grasp_test.",
+                },
+                "open_preset": {
+                    "type": "string",
+                    "description": "Hand preset to open the Inspire hand before grasping.",
+                },
+                "close_preset": {
+                    "type": "string",
+                    "description": "Hand preset to close the Inspire hand during grasping.",
                 },
             },
             "required": ["action"],
@@ -253,12 +305,22 @@ class EmbodiedTool(Tool):
                 return await self._do_g1_move_joint(setup, kwargs)
             if action == "g1_go_named_pose":
                 return await self._do_g1_go_named_pose(setup, kwargs)
+            if action == "g1_gripper_status":
+                return await self._do_g1_gripper_status(setup)
+            if action == "g1_gripper_move":
+                return await self._do_g1_gripper_move(setup, kwargs)
+            if action == "g1_gripper_open":
+                return await self._do_g1_gripper_open(setup, kwargs)
+            if action == "g1_gripper_close":
+                return await self._do_g1_gripper_close(setup, kwargs)
             if action == "g1_hand_status":
                 return await self._do_g1_hand_status(setup)
             if action == "g1_hand_move":
                 return await self._do_g1_hand_move(setup, kwargs)
             if action == "g1_hand_preset":
                 return await self._do_g1_hand_preset(setup, kwargs)
+            if action == "g1_inspire_grasp_test":
+                return await self._do_g1_inspire_grasp_test(setup, kwargs)
             if action == "identify":
                 return await self._do_identify(setup)
             if action == "calibrate":
@@ -471,6 +533,53 @@ class EmbodiedTool(Tool):
             return f"G1 go_named_pose failed: {exc}"
         return json.dumps(result, indent=2, ensure_ascii=False)
 
+    async def _do_g1_gripper_status(self, setup: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        try:
+            result = await self._get_g1_controller().gripper_status(config)
+        except Exception as exc:
+            return f"G1 gripper_status failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_gripper_move(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        if "close_amount" not in kwargs:
+            return "g1_gripper_move requires close_amount."
+        try:
+            result = await self._get_g1_controller().gripper_move(
+                config,
+                kwargs.get("close_amount"),
+                side=kwargs.get("side", "right"),
+                hold_seconds=kwargs.get("hold_seconds", 0.5),
+            )
+        except Exception as exc:
+            return f"G1 gripper_move failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_gripper_open(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        try:
+            result = await self._get_g1_controller().gripper_open(
+                config,
+                side=kwargs.get("side", "right"),
+                hold_seconds=kwargs.get("hold_seconds", 0.5),
+            )
+        except Exception as exc:
+            return f"G1 gripper_open failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_gripper_close(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        try:
+            result = await self._get_g1_controller().gripper_close(
+                config,
+                side=kwargs.get("side", "right"),
+                hold_seconds=kwargs.get("hold_seconds", 0.5),
+            )
+        except Exception as exc:
+            return f"G1 gripper_close failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
     async def _do_g1_hand_status(self, setup: dict[str, Any]) -> str:
         config = dict(setup.get("unitree_g1", {}))
         try:
@@ -514,6 +623,36 @@ class EmbodiedTool(Tool):
             )
         except Exception as exc:
             return f"G1 hand_preset failed: {exc}"
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    async def _do_g1_inspire_grasp_test(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
+        config = dict(setup.get("unitree_g1", {}))
+        if not config.get("enabled"):
+            return "Unitree G1 is not configured. Use g1_setup first."
+        from roboclaw.embodied.embodiment.g1_grasp_test import G1InspireGraspTestRunner
+
+        runner = G1InspireGraspTestRunner(
+            workspace=Path.cwd(),
+            controller=self._get_g1_controller(),
+        )
+        try:
+            result = await runner.run(
+                config=config,
+                target_object_id=str(kwargs.get("target_object_id") or "").strip(),
+                arm_side=str(kwargs.get("arm_side") or "right").strip() or "right",
+                camera_name=str(kwargs.get("camera_name") or "head").strip() or "head",
+                grasp_mode=str(kwargs.get("grasp_mode") or "top_grasp").strip() or "top_grasp",
+                pregrasp_offset_m=float(kwargs.get("pregrasp_offset_m", 0.12)),
+                descend_offset_m=float(kwargs.get("descend_offset_m", 0.08)),
+                lift_height_m=float(kwargs.get("lift_height_m", 0.12)),
+                open_preset=str(kwargs.get("open_preset") or "open").strip() or "open",
+                close_preset=str(kwargs.get("close_preset") or "grasp").strip() or "grasp",
+            )
+        except Exception as exc:
+            result = {
+                "status": "failed",
+                "failure_reason": f"g1_inspire_grasp_test crashed: {exc}",
+            }
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     async def _do_calibrate(self, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:

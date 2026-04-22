@@ -134,9 +134,14 @@ def test_tool_schema() -> None:
         "g1_status",
         "g1_move_joint",
         "g1_go_named_pose",
+        "g1_gripper_status",
+        "g1_gripper_move",
+        "g1_gripper_open",
+        "g1_gripper_close",
         "g1_hand_status",
         "g1_hand_move",
         "g1_hand_preset",
+        "g1_inspire_grasp_test",
     ]
 
 
@@ -178,6 +183,41 @@ async def test_g1_hand_actions_parse_json() -> None:
     assert "left_index" in move_result
     assert "grasp" in preset_result
     assert "received_handstate" in status_result
+
+
+@pytest.mark.asyncio
+async def test_g1_gripper_actions() -> None:
+    tool = EmbodiedTool()
+    tool._g1_controller = type(
+        "FakeController",
+        (),
+        {
+            "gripper_status": AsyncMock(return_value={"ok": True, "received_gripper_state": True}),
+            "gripper_move": AsyncMock(return_value={"ok": True, "close_amount": 0.6}),
+            "gripper_open": AsyncMock(return_value={"ok": True, "preset_name": "open"}),
+            "gripper_close": AsyncMock(return_value={"ok": True, "preset_name": "close"}),
+        },
+    )()
+    setup = {
+        **_MOCK_SETUP,
+        "unitree_g1": {
+            **_MOCK_SETUP["unitree_g1"],
+            "enabled": True,
+            "robot_variant": "g129_dex1",
+            "network_interface": "wlp68s0",
+        },
+    }
+
+    with patch("roboclaw.embodied.setup.ensure_setup", return_value=setup):
+        status_result = await tool.execute(action="g1_gripper_status")
+        move_result = await tool.execute(action="g1_gripper_move", close_amount=0.6)
+        open_result = await tool.execute(action="g1_gripper_open")
+        close_result = await tool.execute(action="g1_gripper_close")
+
+    assert "received_gripper_state" in status_result
+    assert "0.6" in move_result
+    assert "open" in open_result
+    assert "close" in close_result
 
 
 @pytest.mark.asyncio

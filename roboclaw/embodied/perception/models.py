@@ -56,12 +56,17 @@ class YoloSegDetector:
                 mask_rle = _encode_binary_mask(mask_data[idx].detach().cpu().numpy())
             detections.append(
                 {
+                    "object_id": "",
+                    "raw_class_name": class_name,
+                    "task_label": "unknown",
                     "class_name": class_name,
                     "confidence": conf,
                     "bbox_xyxy": bbox,
                     "mask_rle": mask_rle,
                     "center_xy": center_xy,
                     "visibility": 1.0,
+                    "pickable": False,
+                    "container_candidate": False,
                     "attributes": {},
                 }
             )

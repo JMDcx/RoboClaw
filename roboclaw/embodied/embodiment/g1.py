@@ -23,6 +23,10 @@ _LOWSTATE_TOPIC = "rt/lowstate"
 _LOWCMD_TOPIC = "rt/lowcmd"
 _INSPIRE_STATE_TOPIC = "rt/inspire/state"
 _INSPIRE_CMD_TOPIC = "rt/inspire/cmd"
+_DEX1_LEFT_STATE_TOPIC = "rt/dex1/left/state"
+_DEX1_LEFT_CMD_TOPIC = "rt/dex1/left/cmd"
+_DEX1_RIGHT_STATE_TOPIC = "rt/dex1/right/state"
+_DEX1_RIGHT_CMD_TOPIC = "rt/dex1/right/cmd"
 _K_NOT_USED_JOINT = 29
 _G1_VARIANTS = {"g129_dex1", "g129_inspire"}
 _G1_JOINTS = {
@@ -34,11 +38,15 @@ _G1_JOINTS = {
     "left_shoulder_yaw": 17,
     "left_elbow": 18,
     "left_wrist_roll": 19,
+    "left_wrist_pitch": 20,
+    "left_wrist_yaw": 21,
     "right_shoulder_pitch": 22,
     "right_shoulder_roll": 23,
     "right_shoulder_yaw": 24,
     "right_elbow": 25,
     "right_wrist_roll": 26,
+    "right_wrist_pitch": 27,
+    "right_wrist_yaw": 28,
 }
 _REQUIRED_JOINT_INDICES = tuple(sorted(_G1_JOINTS.values()))
 _READY_POSE = {
@@ -47,11 +55,15 @@ _READY_POSE = {
     "left_shoulder_yaw": 0.0,
     "left_elbow": math.pi / 2,
     "left_wrist_roll": 0.0,
+    "left_wrist_pitch": 0.0,
+    "left_wrist_yaw": 0.0,
     "right_shoulder_pitch": 0.0,
     "right_shoulder_roll": -math.pi / 2,
     "right_shoulder_yaw": 0.0,
     "right_elbow": math.pi / 2,
     "right_wrist_roll": 0.0,
+    "right_wrist_pitch": 0.0,
+    "right_wrist_yaw": 0.0,
     "waist_yaw": 0.0,
     "waist_roll": 0.0,
     "waist_pitch": 0.0,
@@ -65,11 +77,15 @@ _NAMED_POSES = {
         "left_shoulder_yaw": 0.0,
         "left_elbow": 1.2,
         "left_wrist_roll": 0.0,
+        "left_wrist_pitch": 0.0,
+        "left_wrist_yaw": 0.0,
         "right_shoulder_pitch": -0.2,
         "right_shoulder_roll": -0.6,
         "right_shoulder_yaw": 0.0,
         "right_elbow": 1.2,
         "right_wrist_roll": 0.0,
+        "right_wrist_pitch": 0.0,
+        "right_wrist_yaw": 0.0,
         "waist_yaw": 0.0,
         "waist_roll": 0.0,
         "waist_pitch": 0.0,
@@ -92,6 +108,9 @@ _HAND_JOINT_ORDER = (
 _HAND_JOINTS = {name: index for index, name in enumerate(_HAND_JOINT_ORDER)}
 _HAND_FINGER_ORDER = ("pinky", "ring", "middle", "index", "thumb_bend", "thumb_rotation")
 _HAND_SIDES = {"left", "right", "both"}
+_DEX1_GRIPPER_SIDES = {"right"}
+_DEX1_GRIPPER_OPEN_Q = 5.4
+_DEX1_GRIPPER_CLOSED_Q = 0.0
 _HAND_OPEN = {
     "right_pinky": 0.05,
     "right_ring": 0.05,
@@ -162,11 +181,20 @@ class UnitreeG1Controller:
         self._publisher: Any | None = None
         self._hand_subscriber: Any | None = None
         self._hand_publisher: Any | None = None
+        self._gripper_subscriber: Any | None = None
+        self._gripper_publisher: Any | None = None
+        self._gripper_left_subscriber: Any | None = None
+        self._gripper_left_publisher: Any | None = None
         self._last_lowstate: Any | None = None
         self._last_lowstate_ts: float | None = None
         self._last_hand_state: Any | None = None
         self._last_hand_state_ts: float | None = None
+        self._last_gripper_state: Any | None = None
+        self._last_gripper_state_ts: float | None = None
+        self._last_left_gripper_state: Any | None = None
+        self._last_left_gripper_state_ts: float | None = None
         self._last_hand_targets: dict[str, float] = dict(_HAND_OPEN)
+        self._last_gripper_targets: dict[str, float] = {"left": 0.0, "right": 0.0}
         self._last_error: str | None = None
         self._lowstate_ready = threading.Event()
 
@@ -178,6 +206,10 @@ class UnitreeG1Controller:
             "lowstate_topic": _LOWSTATE_TOPIC,
             "inspire_command_topic": _INSPIRE_CMD_TOPIC,
             "inspire_state_topic": _INSPIRE_STATE_TOPIC,
+            "dex1_left_command_topic": _DEX1_LEFT_CMD_TOPIC,
+            "dex1_left_state_topic": _DEX1_LEFT_STATE_TOPIC,
+            "dex1_right_command_topic": _DEX1_RIGHT_CMD_TOPIC,
+            "dex1_right_state_topic": _DEX1_RIGHT_STATE_TOPIC,
         }
 
     async def status(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -189,6 +221,9 @@ class UnitreeG1Controller:
         details["received_handstate"] = self._received_handstate
         details["hand_positions"] = self._current_hand_targets()
         details["hand_targets"] = dict(self._last_hand_targets)
+        details["received_gripper_state"] = self._received_gripper_state
+        details["gripper_close_amounts"] = self._current_gripper_targets()
+        details["gripper_targets"] = dict(self._last_gripper_targets)
         return details
 
     async def connect(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -219,12 +254,41 @@ class UnitreeG1Controller:
             hand_msg_mod = self._import_hand_message_module()
             self._hand_subscriber = self._make_hand_subscriber(channel_mod, hand_msg_mod)
             self._hand_publisher = self._make_hand_publisher(channel_mod, hand_msg_mod)
-        else:
+            self._gripper_subscriber = None
+            self._gripper_publisher = None
+            self._gripper_left_subscriber = None
+            self._gripper_left_publisher = None
+            self._last_gripper_state = None
+            self._last_gripper_state_ts = None
+            self._last_left_gripper_state = None
+            self._last_left_gripper_state_ts = None
+            self._last_gripper_targets = {"left": 0.0, "right": 0.0}
+        elif self._is_dex1_variant(config):
+            gripper_msg_mod = self._import_gripper_message_module()
+            self._gripper_left_subscriber = self._make_left_gripper_subscriber(channel_mod, gripper_msg_mod)
+            self._gripper_left_publisher = self._make_left_gripper_publisher(channel_mod, gripper_msg_mod)
+            self._gripper_subscriber = self._make_gripper_subscriber(channel_mod, gripper_msg_mod)
+            self._gripper_publisher = self._make_gripper_publisher(channel_mod, gripper_msg_mod)
             self._hand_subscriber = None
             self._hand_publisher = None
             self._last_hand_state = None
             self._last_hand_state_ts = None
             self._last_hand_targets = dict(_HAND_OPEN)
+        else:
+            self._hand_subscriber = None
+            self._hand_publisher = None
+            self._gripper_subscriber = None
+            self._gripper_publisher = None
+            self._gripper_left_subscriber = None
+            self._gripper_left_publisher = None
+            self._last_hand_state = None
+            self._last_hand_state_ts = None
+            self._last_gripper_state = None
+            self._last_gripper_state_ts = None
+            self._last_left_gripper_state = None
+            self._last_left_gripper_state_ts = None
+            self._last_hand_targets = dict(_HAND_OPEN)
+            self._last_gripper_targets = {"left": 0.0, "right": 0.0}
         self._connected = True
         return {
             "ok": True,
@@ -235,6 +299,10 @@ class UnitreeG1Controller:
             "robot_variant": self._robot_variant(config),
             "hand_command_topic": _INSPIRE_CMD_TOPIC if self._is_inspire_variant(config) else None,
             "hand_state_topic": _INSPIRE_STATE_TOPIC if self._is_inspire_variant(config) else None,
+            "gripper_command_topic": _DEX1_RIGHT_CMD_TOPIC if self._is_dex1_variant(config) else None,
+            "gripper_state_topic": _DEX1_RIGHT_STATE_TOPIC if self._is_dex1_variant(config) else None,
+            "gripper_left_command_topic": _DEX1_LEFT_CMD_TOPIC if self._is_dex1_variant(config) else None,
+            "gripper_left_state_topic": _DEX1_LEFT_STATE_TOPIC if self._is_dex1_variant(config) else None,
         }
 
     async def move_joint(
@@ -339,6 +407,71 @@ class UnitreeG1Controller:
         result["preset_name"] = preset_key
         return result
 
+    async def gripper_status(self, config: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_dex1_gripper_supported(config)
+        return {
+            "ok": True,
+            "robot_variant": self._robot_variant(config),
+            "gripper_command_topic": _DEX1_RIGHT_CMD_TOPIC,
+            "gripper_state_topic": _DEX1_RIGHT_STATE_TOPIC,
+            "received_gripper_state": self._received_gripper_state,
+            "gripper_close_amounts": self._current_gripper_targets(),
+            "gripper_targets": dict(self._last_gripper_targets),
+            "last_gripper_state_timestamp": self._last_gripper_state_ts,
+            "connected": self._connected,
+        }
+
+    async def gripper_move(
+        self,
+        config: dict[str, Any],
+        close_amount: Any,
+        *,
+        side: str = "right",
+        hold_seconds: float = _DEFAULT_HAND_HOLD_S,
+    ) -> dict[str, Any]:
+        self._ensure_dex1_gripper_supported(config)
+        normalized_side = self._coerce_gripper_side(side)
+        normalized_close_amount = self._coerce_close_amount(close_amount)
+        left_open_cmd = self._build_gripper_cmd(self._last_gripper_targets.get("left", 0.0))
+        gripper_cmd = self._build_gripper_cmd(normalized_close_amount)
+        left_writes = await self._publish_message(self._gripper_left_publisher, left_open_cmd, hold_seconds=hold_seconds)
+        right_writes = await self._publish_message(self._gripper_publisher, gripper_cmd, hold_seconds=hold_seconds)
+        self._last_gripper_targets["left"] = self._coerce_close_amount(self._last_gripper_targets.get("left", 0.0))
+        self._last_gripper_targets[normalized_side] = normalized_close_amount
+        return {
+            "ok": True,
+            "side": normalized_side,
+            "close_amount": normalized_close_amount,
+            "hold_seconds": self._coerce_hold_seconds(hold_seconds, _DEFAULT_HAND_HOLD_S),
+            "write_count": right_writes,
+            "left_write_count": left_writes,
+            "command_topic": _DEX1_RIGHT_CMD_TOPIC,
+            "left_command_topic": _DEX1_LEFT_CMD_TOPIC,
+            "state_topic": _DEX1_RIGHT_STATE_TOPIC,
+        }
+
+    async def gripper_open(
+        self,
+        config: dict[str, Any],
+        *,
+        side: str = "right",
+        hold_seconds: float = _DEFAULT_HAND_HOLD_S,
+    ) -> dict[str, Any]:
+        result = await self.gripper_move(config, 0.0, side=side, hold_seconds=hold_seconds)
+        result["preset_name"] = "open"
+        return result
+
+    async def gripper_close(
+        self,
+        config: dict[str, Any],
+        *,
+        side: str = "right",
+        hold_seconds: float = _DEFAULT_HAND_HOLD_S,
+    ) -> dict[str, Any]:
+        result = await self.gripper_move(config, 1.0, side=side, hold_seconds=hold_seconds)
+        result["preset_name"] = "close"
+        return result
+
     @property
     def _received_lowstate(self) -> bool:
         return self._last_lowstate is not None
@@ -346,6 +479,10 @@ class UnitreeG1Controller:
     @property
     def _received_handstate(self) -> bool:
         return self._last_hand_state is not None
+
+    @property
+    def _received_gripper_state(self) -> bool:
+        return self._last_gripper_state is not None
 
     def _validate_config(self, config: dict[str, Any]) -> None:
         network_interface = self._network_interface(config)
@@ -373,6 +510,13 @@ class UnitreeG1Controller:
         if self._hand_publisher is None:
             raise RuntimeError("Unitree G1 Inspire hand publisher is unavailable.")
 
+    def _ensure_dex1_gripper_supported(self, config: dict[str, Any]) -> None:
+        self._ensure_connected()
+        if not self._is_dex1_variant(config):
+            raise ValueError("Unitree G1 gripper control requires robot_variant 'g129_dex1'.")
+        if self._gripper_publisher is None or self._gripper_left_publisher is None:
+            raise RuntimeError("Unitree G1 Dex1 gripper publisher is unavailable.")
+
     def _network_interface(self, config: dict[str, Any]) -> str:
         return str(config.get("network_interface") or "").strip()
 
@@ -385,6 +529,9 @@ class UnitreeG1Controller:
 
     def _is_inspire_variant(self, config: dict[str, Any]) -> bool:
         return self._robot_variant(config) == "g129_inspire"
+
+    def _is_dex1_variant(self, config: dict[str, Any]) -> bool:
+        return self._robot_variant(config) == "g129_dex1"
 
     def _module_exists(self, name: str) -> bool:
         try:
@@ -413,6 +560,9 @@ class UnitreeG1Controller:
             "MotorStates": getattr(go_types, "MotorStates_", None),
         }
 
+    def _import_gripper_message_module(self) -> dict[str, Any]:
+        return self._import_hand_message_module()
+
     def _initialize_channel_factory(self, factory: Any, *, domain: int, network_interface: str) -> None:
         try:
             factory(domain, network_interface)
@@ -439,6 +589,26 @@ class UnitreeG1Controller:
         publisher.Init()
         return publisher
 
+    def _make_gripper_subscriber(self, channel_mod: Any, msg_mod: dict[str, Any]) -> Any:
+        subscriber = channel_mod.ChannelSubscriber(_DEX1_RIGHT_STATE_TOPIC, msg_mod["MotorStates"])
+        subscriber.Init(self._gripper_state_handler, 10)
+        return subscriber
+
+    def _make_gripper_publisher(self, channel_mod: Any, msg_mod: dict[str, Any]) -> Any:
+        publisher = channel_mod.ChannelPublisher(_DEX1_RIGHT_CMD_TOPIC, msg_mod["MotorCmds"])
+        publisher.Init()
+        return publisher
+
+    def _make_left_gripper_subscriber(self, channel_mod: Any, msg_mod: dict[str, Any]) -> Any:
+        subscriber = channel_mod.ChannelSubscriber(_DEX1_LEFT_STATE_TOPIC, msg_mod["MotorStates"])
+        subscriber.Init(self._left_gripper_state_handler, 10)
+        return subscriber
+
+    def _make_left_gripper_publisher(self, channel_mod: Any, msg_mod: dict[str, Any]) -> Any:
+        publisher = channel_mod.ChannelPublisher(_DEX1_LEFT_CMD_TOPIC, msg_mod["MotorCmds"])
+        publisher.Init()
+        return publisher
+
     def _lowstate_handler(self, msg: Any) -> None:
         self._last_lowstate = msg
         self._last_lowstate_ts = time.time()
@@ -447,6 +617,14 @@ class UnitreeG1Controller:
     def _hand_state_handler(self, msg: Any) -> None:
         self._last_hand_state = msg
         self._last_hand_state_ts = time.time()
+
+    def _gripper_state_handler(self, msg: Any) -> None:
+        self._last_gripper_state = msg
+        self._last_gripper_state_ts = time.time()
+
+    def _left_gripper_state_handler(self, msg: Any) -> None:
+        self._last_left_gripper_state = msg
+        self._last_left_gripper_state_ts = time.time()
 
     def _joint_count(self) -> int | None:
         state = self._last_lowstate
@@ -537,6 +715,26 @@ class UnitreeG1Controller:
                 command.kd = 0.0
         return hand_cmd
 
+    def _build_gripper_cmd(self, close_amount: float) -> Any:
+        msg_mod = self._import_gripper_message_module()
+        cmds_type = msg_mod.get("MotorCmds")
+        cmd_type = msg_mod.get("MotorCmdDefault")
+        if cmds_type is None or cmd_type is None:
+            raise RuntimeError("Unitree SDK2 gripper message module does not expose Dex1 command constructors.")
+        gripper_cmd = cmds_type()
+        gripper_cmd.cmds = [cmd_type()]
+        command = gripper_cmd.cmds[0]
+        command.q = self._denormalize_gripper_q(close_amount)
+        if hasattr(command, "dq"):
+            command.dq = 0.0
+        if hasattr(command, "tau"):
+            command.tau = 0.0
+        if hasattr(command, "kp"):
+            command.kp = 0.0
+        if hasattr(command, "kd"):
+            command.kd = 0.0
+        return gripper_cmd
+
     def _compute_crc(self, low_cmd: Any) -> int | None:
         try:
             crc_mod = importlib.import_module("unitree_sdk2py.utils.crc")
@@ -586,6 +784,23 @@ class UnitreeG1Controller:
             raise ValueError(f"Unknown G1 hand side '{side}'. Available: {', '.join(sorted(_HAND_SIDES))}.")
         return normalized
 
+    def _coerce_gripper_side(self, side: Any) -> str:
+        normalized = str(side or "right").strip().lower()
+        if normalized not in _DEX1_GRIPPER_SIDES:
+            raise ValueError(
+                f"Unknown G1 gripper side '{side}'. Available: {', '.join(sorted(_DEX1_GRIPPER_SIDES))}."
+            )
+        return normalized
+
+    def _coerce_close_amount(self, value: Any) -> float:
+        try:
+            close_amount = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"G1 Dex1 close_amount must be numeric: {exc}") from exc
+        if not 0.0 <= close_amount <= 1.0:
+            raise ValueError("G1 Dex1 close_amount must be within [0, 1].")
+        return close_amount
+
     def _expand_hand_positions(self, positions: dict[str, Any], side: str) -> dict[str, float]:
         if not isinstance(positions, dict) or not positions:
             raise ValueError("G1 hand positions must be a non-empty object.")
@@ -623,11 +838,31 @@ class UnitreeG1Controller:
         normalized = (high - q_value) / (high - low)
         return max(0.0, min(1.0, normalized))
 
+    def _denormalize_gripper_q(self, close_amount: float) -> float:
+        return _DEX1_GRIPPER_OPEN_Q + (_DEX1_GRIPPER_CLOSED_Q - _DEX1_GRIPPER_OPEN_Q) * float(close_amount)
+
+    def _normalize_gripper_q(self, q_value: float) -> float:
+        span = _DEX1_GRIPPER_OPEN_Q - _DEX1_GRIPPER_CLOSED_Q
+        if span <= 0.0:
+            return 0.0
+        normalized = (_DEX1_GRIPPER_OPEN_Q - float(q_value)) / span
+        return max(0.0, min(1.0, normalized))
+
     def _hand_joint_kind(self, joint_name: str) -> str:
         _, _, kind = joint_name.partition("_")
         if kind.startswith("thumb_"):
             return kind
         return kind
+
+    def _current_gripper_targets(self) -> dict[str, float]:
+        positions = dict(self._last_gripper_targets)
+        right_state = getattr(self._last_gripper_state, "states", []) if self._last_gripper_state is not None else []
+        left_state = getattr(self._last_left_gripper_state, "states", []) if self._last_left_gripper_state is not None else []
+        if right_state:
+            positions["right"] = self._normalize_gripper_q(float(getattr(right_state[0], "q", _DEX1_GRIPPER_OPEN_Q)))
+        if left_state:
+            positions["left"] = self._normalize_gripper_q(float(getattr(left_state[0], "q", _DEX1_GRIPPER_OPEN_Q)))
+        return positions
 
     def _debug_details(self, config: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -648,4 +883,10 @@ class UnitreeG1Controller:
             "hand_state_topic": _INSPIRE_STATE_TOPIC if self._is_inspire_variant(config) else None,
             "received_handstate": self._received_handstate,
             "last_hand_state_timestamp": self._last_hand_state_ts,
+            "gripper_command_topic": _DEX1_RIGHT_CMD_TOPIC if self._is_dex1_variant(config) else None,
+            "gripper_state_topic": _DEX1_RIGHT_STATE_TOPIC if self._is_dex1_variant(config) else None,
+            "gripper_left_command_topic": _DEX1_LEFT_CMD_TOPIC if self._is_dex1_variant(config) else None,
+            "gripper_left_state_topic": _DEX1_LEFT_STATE_TOPIC if self._is_dex1_variant(config) else None,
+            "received_gripper_state": self._received_gripper_state,
+            "last_gripper_state_timestamp": self._last_gripper_state_ts,
         }

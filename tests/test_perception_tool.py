@@ -22,6 +22,9 @@ class _StubService:
             overlay_path=str(self._overlay),
             objects=[
                 DetectedObject(
+                    object_id="object_1",
+                    raw_class_name="cup",
+                    task_label="object",
                     track_id=1,
                     class_name="cup",
                     confidence=0.9,
@@ -31,6 +34,8 @@ class _StubService:
                     stable=True,
                     age=3,
                     visibility=1.0,
+                    pickable=True,
+                    container_candidate=False,
                 )
             ],
         )
