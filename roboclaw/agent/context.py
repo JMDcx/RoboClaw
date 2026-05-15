@@ -6,11 +6,13 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from roboclaw.utils.helpers import current_time_str
-
-from roboclaw.agent.memory import MemoryStore
+from roboclaw.agent.memory import MemoryStore, PersonalizedMemoryManager
 from roboclaw.agent.skills import SkillsLoader
-from roboclaw.utils.helpers import build_assistant_message, detect_image_mime
+from roboclaw.utils.helpers import (
+    build_assistant_message,
+    current_time_str,
+    detect_image_mime,
+)
 
 
 class ContextBuilder:
@@ -23,8 +25,20 @@ class ContextBuilder:
         self.workspace = workspace
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
+        self._personalized_memory: PersonalizedMemoryManager | None = None
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    @property
+    def _pmem(self) -> PersonalizedMemoryManager:
+        if self._personalized_memory is None:
+            self._personalized_memory = PersonalizedMemoryManager(self.workspace)
+        return self._personalized_memory
+
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        user_id: str | None = None,
+        task_category: str | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -35,6 +49,11 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        if user_id:
+            personalized = self._pmem.get_context(user_id, task_category).render()
+            if personalized:
+                parts.append(personalized)
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -125,6 +144,8 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        user_id: str | None = None,
+        task_category: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -138,7 +159,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, user_id, task_category)},
             *history,
             {"role": "user", "content": merged},
         ]

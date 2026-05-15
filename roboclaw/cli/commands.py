@@ -384,8 +384,6 @@ def _onboard_plugins(config_path: Path) -> None:
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
     from roboclaw.providers.base import GenerationSettings
-    from roboclaw.providers.openai_codex_provider import OpenAICodexProvider
-    from roboclaw.providers.azure_openai_provider import AzureOpenAIProvider
 
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
@@ -393,6 +391,16 @@ def _make_provider(config: Config):
 
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
+        try:
+            from roboclaw.providers.openai_codex_provider import OpenAICodexProvider
+        except ModuleNotFoundError as exc:
+            if exc.name == "oauth_cli_kit":
+                console.print("[red]Error: openai_codex provider requires oauth_cli_kit.[/red]")
+                console.print("Install it only if you intend to use OpenAI Codex OAuth:")
+                console.print("  pip install oauth-cli-kit")
+                console.print("For OpenAI-compatible API demos, set agents.defaults.provider to custom.")
+                raise typer.Exit(1) from exc
+            raise
         provider = OpenAICodexProvider(default_model=model)
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     elif provider_name == "custom":
@@ -404,6 +412,8 @@ def _make_provider(config: Config):
         )
     # Azure OpenAI: direct Azure OpenAI endpoint with deployment name
     elif provider_name == "azure_openai":
+        from roboclaw.providers.azure_openai_provider import AzureOpenAIProvider
+
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
             console.print("Set them in ~/.roboclaw/config.json under providers.azure_openai section")

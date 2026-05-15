@@ -1,0 +1,1 @@
+{"ts_iso": "2026-04-30T12:55:34.122+00:00", "ts_ns": 1777553734122311254, "event": "agent.llm_call", "iteration": 1, "elapsed_ms": 7135, "has_tool_calls": false, "num_tool_calls": 0, "model": "qwen3.6-35b-a3b", "finish_reason": "error"}

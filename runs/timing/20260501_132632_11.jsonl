@@ -1,0 +1,1 @@
+{"ts_iso": "2026-05-01T12:26:32.985+00:00", "ts_ns": 1777638392985273938, "event": "tool.libero_cosmos_manipulation", "status": "partial", "completed_subgoals": [], "stop_reason": "cosmos_unavailable_or_invalid", "decisions": 1, "elapsed_ms": 3}

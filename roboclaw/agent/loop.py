@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -15,17 +16,19 @@ from loguru import logger
 
 from roboclaw.agent.context import ContextBuilder
 from roboclaw.agent.memory import MemoryConsolidator
+from roboclaw.agent.memory.manager import PersonalizedMemoryManager
+from roboclaw.agent.skills import BUILTIN_SKILLS_DIR
 from roboclaw.agent.subagent import SubagentManager
+from roboclaw.agent.timing import log_event
 from roboclaw.agent.tools.base import ToolResult
 from roboclaw.agent.tools.cron import CronTool
-from roboclaw.agent.skills import BUILTIN_SKILLS_DIR
+from roboclaw.agent.tools.executor import ExecutorTool
 from roboclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from roboclaw.agent.tools.message import MessageTool
-from roboclaw.agent.tools.executor import ExecutorTool
 from roboclaw.agent.tools.perception import PerceptionTool
 from roboclaw.agent.tools.registry import ToolRegistry
-from roboclaw.agent.tools.sim_camera import SimCameraTool
 from roboclaw.agent.tools.shell import ExecTool
+from roboclaw.agent.tools.sim_camera import SimCameraTool
 from roboclaw.agent.tools.spawn import SpawnTool
 from roboclaw.agent.tools.task_state import TaskStateTool
 from roboclaw.agent.tools.web import WebFetchTool, WebSearchTool
@@ -37,6 +40,23 @@ from roboclaw.session.manager import Session, SessionManager
 if TYPE_CHECKING:
     from roboclaw.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
     from roboclaw.cron.service import CronService
+
+
+_TASK_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "tidyup": ["tidy", "clean", "put away", "pick up", "clear", "declutter"],
+    "fetch": ["fetch", "bring", "get me", "hand me", "retrieve"],
+    "sort": ["sort", "organize", "arrange", "group"],
+    "place": ["place", "put", "set", "move"],
+    "inspection": ["inspect", "check", "look at", "examine", "scan"],
+}
+
+
+def _infer_task_category(text: str) -> str:
+    lower = text.lower()
+    for category, keywords in _TASK_CATEGORY_KEYWORDS.items():
+        if any(kw in lower for kw in keywords):
+            return category
+    return "general"
 
 
 class AgentLoop:
@@ -88,6 +108,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
 
         self.context = ContextBuilder(workspace)
+        self.personalized_memory = PersonalizedMemoryManager(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.subagents = SubagentManager(
@@ -146,6 +167,33 @@ class AgentLoop:
         if not self.restrict_to_workspace:
             from roboclaw.embodied.tool import EmbodiedTool
             self.tools.register(EmbodiedTool(tty_handoff=self.tty_handoff))
+
+        if os.environ.get("ROBOCLAW_ENABLE_LIBERO", "0") == "1":
+            try:
+                from roboclaw.agent.tools.libero_skill import (
+                    LiberoCosmosRouteTool,
+                    LiberoManipulationTool,
+                    LiberoObserveTool,
+                    LiberoPerceptionTool,
+                    LiberoPlanTool,
+                    LiberoSkillTool,
+                    LiberoVerifyTool,
+                )
+
+                self.tools.register(LiberoPerceptionTool(workspace=self.workspace))
+                self.tools.register(LiberoPlanTool())
+                self.tools.register(LiberoCosmosRouteTool(workspace=self.workspace))
+                self.tools.register(LiberoVerifyTool(workspace=self.workspace))
+                self.tools.register(LiberoManipulationTool(workspace=self.workspace))
+                self.tools.register(LiberoSkillTool(workspace=self.workspace))
+                self.tools.register(LiberoObserveTool(workspace=self.workspace))
+                logger.info(
+                    "Registered LIBERO tools (libero_perception, libero_plan, "
+                    "libero_cosmos_route, libero_verify, libero_manipulation, "
+                    "libero_skill, libero_observe)."
+                )
+            except Exception as exc:
+                logger.warning("ROBOCLAW_ENABLE_LIBERO=1 but failed to load LIBERO tools: {}", exc)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -210,10 +258,20 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
+            _t_llm = time.time()
             response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
                 model=self.model,
+            )
+            log_event(
+                "agent.llm_call",
+                iteration=iteration,
+                elapsed_ms=int((time.time() - _t_llm) * 1000),
+                has_tool_calls=response.has_tool_calls,
+                num_tool_calls=len(response.tool_calls) if response.has_tool_calls else 0,
+                model=self.model,
+                finish_reason=getattr(response, "finish_reason", None),
             )
 
             if response.has_tool_calls:
@@ -239,7 +297,14 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
+                    _t_tool = time.time()
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    log_event(
+                        "agent.tool_call",
+                        iteration=iteration,
+                        tool=tool_call.name,
+                        elapsed_ms=int((time.time() - _t_tool) * 1000),
+                    )
                     media: list[str] = []
                     if isinstance(result, ToolResult):
                         media = list(result.media)
@@ -447,12 +512,33 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        user_id = msg.sender_id
+        task_category = _infer_task_category(msg.content)
+        intake_result = self.personalized_memory.ingest_user_message(
+            user_id=user_id,
+            session_key=key,
+            user_message=msg.content,
+            task_category=task_category,
+        )
+        working = self.personalized_memory.begin_task(
+            user_id=user_id,
+            session_key=key,
+            task_id=key,
+            user_goal=msg.content,
+            task_category=task_category,
+        )
+        for event in intake_result.episodic_events:
+            if event.event_type == "correction":
+                working.user_corrections.append(event.content)
+
         history = session.get_history(max_messages=0)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            user_id=user_id,
+            task_category=task_category,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -463,9 +549,16 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, tools_used, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
+        self._record_memory_trace_from_tools(working, all_msgs)
+
+        if "executor" in tools_used or any(name.startswith("libero_") for name in tools_used):
+            # ExecutorTool does not yet propagate failures into working.failure_count,
+            # so this outcome is a temporary placeholder until that integration lands.
+            outcome = "success" if working.failure_count == 0 else "partial"
+            self.personalized_memory.end_task(working, outcome, task_category)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -483,6 +576,46 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=msg.metadata or {},
         )
+
+    @staticmethod
+    def _record_memory_trace_from_tools(working, messages: list[dict]) -> None:
+        """Backfill working memory from structured tool JSON emitted during a turn."""
+        for msg in messages:
+            if msg.get("role") != "tool":
+                continue
+            name = msg.get("name", "")
+            payload = AgentLoop._extract_tool_json(msg.get("content"))
+            if not payload:
+                continue
+            if name == "libero_perception":
+                working.perception_snapshot = payload
+            elif name == "libero_plan":
+                working.active_plan = payload
+                working.planner_decision_trace = list(
+                    payload.get("personalization_decisions", [])
+                )
+            elif name == "libero_manipulation":
+                observed = payload.get("observed_effect", {})
+                working.skill_calls.append({
+                    "skill_id": observed.get("skill_id") or payload.get("skill_id"),
+                    "subgoal_id": observed.get("subgoal_id") or payload.get("subgoal_id"),
+                    "status": payload.get("status"),
+                    "steps": observed.get("steps"),
+                    "final_reward": observed.get("final_reward"),
+                })
+
+    @staticmethod
+    def _extract_tool_json(content) -> dict:
+        if not isinstance(content, str):
+            return {}
+        start = content.find("{")
+        if start < 0:
+            return {}
+        try:
+            parsed = json.loads(content[start:])
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""

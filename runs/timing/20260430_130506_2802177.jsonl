@@ -1,0 +1,7 @@
+{"ts_iso": "2026-04-30T12:05:06.516+00:00", "ts_ns": 1777550706516977418, "event": "agent.llm_call", "iteration": 1, "elapsed_ms": 7796, "has_tool_calls": true, "num_tool_calls": 1, "model": "qwen3.6-35b-a3b", "finish_reason": "tool_calls"}
+{"ts_iso": "2026-04-30T12:05:13.485+00:00", "ts_ns": 1777550713485173558, "event": "tool.libero_perception", "elapsed_ms": 6967, "render_ms": 25, "yolo_ms": 575, "yolo_status": "ok", "num_detections": 5, "reset_applied": false}
+{"ts_iso": "2026-04-30T12:05:13.485+00:00", "ts_ns": 1777550713485272387, "event": "agent.tool_call", "iteration": 1, "tool": "libero_perception", "elapsed_ms": 6968}
+{"ts_iso": "2026-04-30T12:05:20.494+00:00", "ts_ns": 1777550720494680732, "event": "agent.llm_call", "iteration": 2, "elapsed_ms": 7009, "has_tool_calls": true, "num_tool_calls": 1, "model": "qwen3.6-35b-a3b", "finish_reason": "tool_calls"}
+{"ts_iso": "2026-04-30T12:05:20.495+00:00", "ts_ns": 1777550720495068565, "event": "tool.libero_plan", "elapsed_ms": 0, "num_subgoals": 0, "subgoals": [], "has_memory_preferences": false, "has_planning_memory_context": true}
+{"ts_iso": "2026-04-30T12:05:20.495+00:00", "ts_ns": 1777550720495204049, "event": "agent.tool_call", "iteration": 2, "tool": "libero_plan", "elapsed_ms": 0}
+{"ts_iso": "2026-04-30T12:05:24.621+00:00", "ts_ns": 1777550724621384452, "event": "agent.llm_call", "iteration": 3, "elapsed_ms": 4126, "has_tool_calls": false, "num_tool_calls": 0, "model": "qwen3.6-35b-a3b", "finish_reason": "stop"}

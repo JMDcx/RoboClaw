@@ -1,0 +1,10 @@
+path: /home/xinyuan/RoboClaw/resource/yolo_dataset
+train: images/train
+val: images/val
+nc: 5
+names:
+  0: white_mug
+  1: yellow_mug
+  2: red_mug
+  3: plate_left
+  4: plate_right
